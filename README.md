@@ -7,13 +7,13 @@ A complete IoT system with ESP32 edge devices, an optional smartphone gateway an
 
 ## 👥 Team
 
-| Member | Role / focus |
-|---|---|
-| Chang Shu Kai | _TBD_ |
-| Loh Wern She | _TBD_ |
-| Ng Ren Jie Daniel | _TBD_ |
-| Tan Chyn | _TBD_ |
-| Toh Xiang Yi Thomas | _TBD_ |
+| Member | 
+|---|
+| Chang Shu Kai | 
+| Loh Wern She | 
+| Ng Ren Jie Daniel | 
+| Tan Chyn | 
+| Toh Xiang Yi Thomas | 
 
 ## 🗂️ Repository map
 
