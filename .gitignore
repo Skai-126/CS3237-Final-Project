@@ -1,0 +1,33 @@
+# Secrets
+secrets.h
+.env
+*.pem
+*.key
+
+# PlatformIO / Arduino
+.pio/
+.vscode/
+build/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+
+# Data & models (keep large files out of git)
+data/*
+!data/README.md
+!data/samples/
+*.h5
+*.tflite
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+~$*
