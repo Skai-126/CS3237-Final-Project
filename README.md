@@ -1,59 +1,71 @@
-# CS3237 Group 3 – IoT Project
+# ZoneSort: Automated Parcel Sorting for HDB Estates
 
-> NUS CS3237 Introduction to Internet of Things · AY2026/27 Sem 1
-> **Status:** 🟡 Choosing an idea · **Next deadline:** Proposal – **Mon 28 Sep, 23:59** (Canvas)
+> NUS CS3237 Introduction to Internet of Things · AY2026/27 Sem 1 · Group 3
+> **Status:** 🟢 Building (before parts arrive) · **Proposal:** ✅ [submitted](docs/proposal/) · **Feedback:** [read it](docs/proposal/#feedback-on-the-proposal)
 
-A complete IoT system with ESP32 edge devices, an optional smartphone gateway and a cloud backend. It does **real-time processing at the edge** for critical events and **long-term ML analytics in the cloud**.
+A courier loads parcels into a feeder. ZoneSort releases them one at a time, reads each QR label, and routes the parcel along a conveyor to **Zone A** (floors 1–5), **Zone B** (floors 6–10) or **Manual** (unreadable or unknown label). Every parcel is logged to the cloud, which forecasts next-day parcel volume per block so supervisors can plan how many couriers they need.
+
+Sorting runs **locally on the ESP32s and never waits for the cloud**. If the zone lookup times out, the parcel goes to Manual.
 
 ## 👥 Team
 
-| Member | 
-|---|
-| Chang Shu Kai | 
-| Loh Wern She | 
-| Ng Ren Jie Daniel | 
-| Tan Chyn | 
-| Toh Xiang Yi Thomas | 
+| Member | Area | Main folders |
+|---|---|---|
+| Tan Chyn | Mechanical, servos & IR | [`hardware/`](hardware/) |
+| Toh Xiang Yi Thomas | Firmware: ESP-NOW, Node 1, motor control | [`node1/`](node1/), [`node2/`](node2/) |
+| Ng Ren Jie Daniel | Firmware: Node 2 tasks, gate logic, fail-safes | [`node2/`](node2/) |
+| Loh Wern She | Scanning & gateway | [`gateway/`](gateway/) |
+| Chang Shu Kai | Cloud, dashboard & ML | [`cloud/`](cloud/), [`ml/`](ml/) |
 
 ## 🗂️ Repository map
 
 | Folder | What goes here |
 |---|---|
-| [`docs/`](docs/) | Project brief, idea pages, proposal, meeting notes, reports |
-| [`docs/ideas/`](docs/ideas/) | The 6 candidate ideas + comparison, **start here** |
-| [`hardware/`](hardware/) | Parts list & budget, wiring diagrams, enclosure / 3D-print files, datasheets |
-| [`software/`](software/) | ESP32 firmware, gateway app, backend server, ML, dashboard |
-| [`data/`](data/) | Info about collected sensor datasets (large files stay out of git) |
+| [`node1/`](node1/) | ESP32 #1, inspection node: IR arrival trigger, ESP-NOW link to Node 2, MQTT |
+| [`node2/`](node2/) | ESP32 #2, conveyor & sorting node: belt motor, servo gates, gate IRs, fail-safes (FreeRTOS) |
+| [`gateway/`](gateway/) | Laptop: QR decoding from the phone camera, zone mapping, MQTT broker, Telegram alerts |
+| [`cloud/`](cloud/) | Parcel event schema, database, dashboard |
+| [`ml/`](ml/) | Traffic simulator, next-day forecasting models, evaluation |
+| [`hardware/`](hardware/) | CAD / 3D-print files, wiring & power plan, parts list, datasheets |
+| [`docs/`](docs/) | Proposal, project brief, meeting notes, reports |
+| [`data/`](data/) | Dataset descriptions (large files stay out of git) |
 
-## 🏗️ System overview (generic, to be updated after we pick an idea)
+## 🏗️ System overview
 
 ```mermaid
 flowchart LR
-  subgraph Edge["Edge – ESP32 devices"]
-    D1["ESP32 #1<br/>sensors"]
-    D2["ESP32 #2<br/>sensors + actuator"]
+  CAM["Phone camera<br/>(IP camera over belt)"]
+  subgraph Edge["Edge: ESP32 nodes"]
+    N1["Node 1: inspection<br/>IR arrival trigger"]
+    N2["Node 2: conveyor & sorting<br/>belt motor · servo gates<br/>gate IRs · buzzer"]
   end
-  G["Gateway (optional)<br/>smartphone app"]
-  subgraph Cloud["Cloud / laptop server"]
-    B["MQTT broker +<br/>REST backend"]
-    DB[("Database")]
-    ML["ML analytics<br/>(training + prediction)"]
+  subgraph GW["Gateway: laptop"]
+    QR["QR decode (pyzbar)<br/>+ zone mapping"]
+    BR["Mosquitto<br/>MQTT broker"]
+    TG["Telegram alerts"]
+  end
+  subgraph Cloud["Cloud"]
+    DB[("Parcel events")]
+    ML["Next-day forecast<br/>per block"]
     UI["Dashboard"]
   end
-  D1 -- MQTT/REST over Wi-Fi --> B
-  D2 -- MQTT/REST over Wi-Fi --> B
-  D1 -.-> G -.-> B
-  B --> DB --> ML --> UI
-  B -- commands --> D2
+  CAM -- video --> QR
+  N1 -- arrival --> BR
+  QR -- "zone / flip" --> BR
+  BR -- zone --> N1
+  N1 -- "ESP-NOW<br/>{parcel_id, zone}" --> N2
+  N2 -- "sort / fault events" --> BR
+  BR --> DB --> ML --> UI
+  BR --> TG
 ```
 
-Real-time decisions (e.g. triggering an actuator) happen **on the ESP32**; the cloud stores history and runs the ML.
+Topic names and message payloads will be fixed in the event schema ([`cloud/`](cloud/)).
 
 ## 📅 Timeline & grading
 
 | When | Deliverable | Weight |
 |---|---|---|
-| Mon 28 Sep, 23:59 | Project proposal (Canvas) | 10% |
+| Mon 28 Sep, 23:59 | ✅ Project proposal (Canvas) | 10% |
 | Week 9 | Check-in 1 + Peer Review 1 | 5% |
 | Week 11 | Check-in 2 (with demo) | 5% |
 | Fri 13 Nov | Final demo + presentation | 20% |
@@ -65,6 +77,7 @@ Full summary of the spec: [`docs/project-brief.md`](docs/project-brief.md)
 ## 🤝 How we work
 
 - **Discussion & tasks:** use GitHub **Issues** (one per task/question) and the **Projects** board.
-- **Code changes:** make a branch (`firmware/rain-sensor`, `ml/drying-model` …) → open a **Pull Request** → someone else reviews → merge.
+- **Code changes:** make a branch (`node2/gate-logic`, `ml/baseline` …) → open a **Pull Request** → someone else reviews → merge.
 - **Meeting notes:** add a file to [`docs/meeting-notes/`](docs/meeting-notes/) using the template.
-- **Never commit** Wi-Fi passwords, API keys or cloud credentials. Put them in `secrets.h` / `.env` (already in `.gitignore`).
+- **Each folder's README** explains how to build/run that part.
+- **Never commit** Wi-Fi passwords, API keys or cloud credentials. Put them in `secrets.h` (firmware) or `.env` (Python); both are in `.gitignore`. Commit a `secrets.example.h` / `.env.example` instead.

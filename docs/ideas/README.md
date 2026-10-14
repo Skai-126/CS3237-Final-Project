@@ -1,6 +1,6 @@
 # Project ideas
 
-Vote for your top 2 in the group chat (or react on the voting Issue). **We need to decide by Sun 27 Sep** to write the proposal (due Mon 28 Sep, 23:59).
+> ✅ **Decided:** we went with **ZoneSort**, an automated parcel sorter (see the [proposal](../proposal/)). This page is kept for reference.
 
 | # | Idea | Proposed by | One-liner |
 |---|---|---|---|
@@ -38,5 +38,7 @@ _Rough judgements to start discussion, not final scores._
 
 ## Possible merge
 Ideas **2 + 4** fit together: the AI sorting bin (edge: camera classification + funnel sorting) plus fill-level/odour sensing and multi-bin MQTT routing (cloud: fill forecasting and collection-route suggestions). That covers both the real-time edge action and the long-term cloud ML.
+
+Architecture sketch for this merge: [04-sorting-bin-architecture.png](04-sorting-bin-architecture.png)
 
 📄 Word version for sharing (ideas 1–9): [CS3237_Group3_Project_Ideas.docx](CS3237_Group3_Project_Ideas.docx)
