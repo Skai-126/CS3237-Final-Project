@@ -6,7 +6,7 @@ Stores every parcel event and shows live counts, faults and forecasts.
 
 ## Scope
 - Parcel event schema, shared by `node1/`, `node2/` and `gateway/`
-- Event storage (platform to be decided)
+- Event storage: MySQL, filled by an MQTT subscriber
 - Dashboard: counts by block, unreadable count, faults, forecast panel
 
 ## Database
@@ -113,10 +113,21 @@ the parcel actually went through. A mismatch between them shows up as a timeout.
 ## Build / run
 
 ```bash
-pip install sqlalchemy pymysql pandas python-dotenv
-cp .env.example .env   # fill in your real password
+pip install sqlalchemy pymysql pandas python-dotenv paho-mqtt
+cp .env.example .env   # fill in your real password and broker address
 python db.py           # should print 0 once schema.sql has been run
+python subscriber.py   # leave running: stores every zonesort/# event
 ```
 
 Credentials go in `.env` (gitignored); [`.env.example`](.env.example) shows the shape.
 [`db.py`](db.py) is the shared connection helper for the subscriber, ML and dashboard.
+
+[`subscriber.py`](subscriber.py) listens on `zonesort/#` and upserts into `parcels` /
+`faults`. It drops malformed messages (bad JSON, missing `seq`, unknown zone) with a
+warning instead of crashing. If it restarts while Node 1 is still up, it continues the
+latest session, but only if that session saw a parcel in the last 10 minutes.
+Otherwise it starts a new one, so a Node 1 reboot can't overwrite old rows.
+
+**Testing without hardware:** with a broker running (`mosquitto -v`) and the subscriber
+up, run `python fake_events.py -n 20`. It publishes a fake run (unreadable labels,
+unknown floors, timeouts and missed parcels included) in exactly the schema's format.
