@@ -26,7 +26,7 @@ python forecast.py     # tomorrow's parcels per block
 | [`simulate.py`](simulate.py) | Generates parcels in the `parcels` table format: 6 blocks with their own rates, weekday effect, slow growth, 9.9 / 10.10 / 11.11 / 12.12 sale spikes, noisy days, plus unreadable labels, flips, timeouts and misses |
 | [`features.py`](features.py) | Loads history (`sim`, `db` or `both`), counts parcels per block per day (zero-filled), builds features from past days only |
 | [`train.py`](train.py) | Trains baseline / Poisson / XGBoost, tests on the last 42 days, writes `metrics.json` and `test_predictions.csv` (for report plots), then refits on all days and saves |
-| [`forecast.py`](forecast.py) | Loads a saved model and predicts the next day per block. The dashboard calls `forecast()` |
+| [`forecast.py`](forecast.py) | Loads a saved model and predicts the next day per block. The dashboard API (`cloud/backend`) calls `forecast()` |
 
 **Data sources.** `--source both` (the default) uses the real MySQL events on days the
 prototype ran and simulated traffic on every other day, so real runs feed both training
