@@ -7,7 +7,7 @@ Stores every parcel event and shows live counts, faults and forecasts.
 ## Scope
 - Parcel event schema, shared by `node1/`, `node2/` and `gateway/`
 - Event storage: MySQL, filled by an MQTT subscriber
-- Dashboard: counts by block, unreadable count, faults, forecast panel
+- Dashboard ([`dashboard.py`](dashboard.py)): counts by block, unreadable count, faults, forecast panel
 
 ## Database
 
@@ -19,9 +19,8 @@ account (ask Shu Kai for the password). Don't port-forward 3306 on a home router
 
 ## Event schema
 
-**Status: proposed, waiting for the gateway and firmware owners to agree.** Built from
-[`schema.sql`](schema.sql). Comment on the GitHub issue before changing a topic or
-field. Changing them later breaks everyone.
+**Status: agreed by the team.** Built from [`schema.sql`](schema.sql). Comment on the
+GitHub issue before changing a topic or field. Changing them now breaks everyone.
 
 ### Ground rules
 - **`seq` is the parcel key.** Node 1 numbers each arrival 1, 2, 3, … (restarting at 1
@@ -113,10 +112,11 @@ the parcel actually went through. A mismatch between them shows up as a timeout.
 ## Build / run
 
 ```bash
-pip install sqlalchemy pymysql pandas python-dotenv paho-mqtt
+pip install sqlalchemy pymysql pandas python-dotenv paho-mqtt streamlit scikit-learn xgboost joblib
 cp .env.example .env   # fill in your real password and broker address
 python db.py           # should print 0 once schema.sql has been run
 python subscriber.py   # leave running: stores every zonesort/# event
+python -m streamlit run dashboard.py
 ```
 
 Credentials go in `.env` (gitignored); [`.env.example`](.env.example) shows the shape.
@@ -131,3 +131,20 @@ Otherwise it starts a new one, so a Node 1 reboot can't overwrite old rows.
 **Testing without hardware:** with a broker running (`mosquitto -v`) and the subscriber
 up, run `python fake_events.py -n 20`. It publishes a fake run (unreadable labels,
 unknown floors, timeouts and missed parcels included) in exactly the schema's format.
+
+## Dashboard
+
+`python -m streamlit run dashboard.py` opens it at http://localhost:8501. It refreshes every 5 s.
+
+- **Top:** parcels, Zone A / B / Manual, unreadable or unknown labels, timeouts, faults;
+  parcels by block (stacked by the gate that actually fired), arrivals over time, the
+  fault log and the last 50 parcels. The sidebar picks the latest session, today, or
+  all time.
+- **Forecast:** tomorrow's parcels per block from the chosen model, next to the usual
+  count for that weekday, plus a rough courier count and each model's test accuracy.
+  It needs the trained models: see [`ml/`](../ml/).
+- **Data → Simulated** reads `data/sim_parcels.csv` instead of MySQL, for working on the
+  dashboard without the database.
+
+DB errors show only the error type, not the message, because a bad `DB_URL` can echo
+part of the password onto the page.

@@ -26,6 +26,7 @@ data/*
 *.h5
 *.tflite
 *.pt
+ml/models/
 
 # OS
 .DS_Store
