@@ -7,7 +7,7 @@ Stores every parcel event and shows live counts, faults and forecasts.
 ## Scope
 - Parcel event schema, shared by `node1/`, `node2/` and `gateway/`
 - Event storage: MySQL, filled by an MQTT subscriber
-- Dashboard ([`dashboard.py`](dashboard.py)): counts by block, unreadable count, faults, forecast panel
+- Dashboard: Django API ([`backend/`](backend/)) + React app ([`frontend/`](frontend/)): counts by block, unreadable count, faults, forecast panel
 
 ## Database
 
@@ -112,12 +112,13 @@ the parcel actually went through. A mismatch between them shows up as a timeout.
 ## Build / run
 
 ```bash
-pip install sqlalchemy pymysql pandas python-dotenv paho-mqtt streamlit scikit-learn xgboost joblib
+pip install sqlalchemy pymysql pandas python-dotenv paho-mqtt django mysqlclient scikit-learn xgboost joblib
 cp .env.example .env   # fill in your real password and broker address
 python db.py           # should print 0 once schema.sql has been run
 python subscriber.py   # leave running: stores every zonesort/# event
-python -m streamlit run dashboard.py
 ```
+
+Then start the dashboard: see [Dashboard](#dashboard).
 
 Credentials go in `.env` (gitignored); [`.env.example`](.env.example) shows the shape.
 [`db.py`](db.py) is the shared connection helper for the subscriber, ML and dashboard.
@@ -134,17 +135,49 @@ unknown floors, timeouts and missed parcels included) in exactly the schema's fo
 
 ## Dashboard
 
-`python -m streamlit run dashboard.py` opens it at http://localhost:8501. It refreshes every 5 s.
+A **Django** backend serves JSON from the `parcels` / `faults` tables and the `ml/`
+forecast; a **React** app (Vite + Recharts) draws it. Needs Node.js 20+ for the frontend.
 
-- **Top:** parcels, Zone A / B / Manual, unreadable or unknown labels, timeouts, faults;
-  parcels by block (stacked by the gate that actually fired), arrivals over time, the
-  fault log and the last 50 parcels. The sidebar picks the latest session, today, or
-  all time.
+```
+backend/                     Django project (no migrations: the tables belong to schema.sql)
+  zonesort/settings.py       reads DB_URL from cloud/.env
+  api/models.py              Parcel, Fault (read-only views of the tables)
+  api/data.py                KPIs, per-block counts, arrivals, forecast
+  api/views.py               GET /api/live, GET /api/forecast
+frontend/                    React app
+  src/App.jsx                page layout
+  src/components/            charts, tiles, tables
+```
+
+**Demo / normal use** (one server, also reachable from teammates over Tailscale):
+
+```bash
+cd frontend && npm install && npm run build      # once, and after frontend changes
+cd ../backend && python manage.py runserver 0.0.0.0:8000
+```
+
+Open http://localhost:8000.
+
+**Working on the frontend** (hot reload): keep the Django server running, then
+`cd frontend && npm run dev` and open http://localhost:5173. Vite forwards `/api` to Django.
+
+### What it shows
+- **Live:** parcels, Zone A / B / Manual, unreadable or unknown labels, timeouts, misses,
+  faults; parcels by block (stacked by the gate that actually fired), arrivals over time,
+  the fault log and the last 50 parcels. Refreshes every 5 s. Pick the latest session,
+  today, or all time at the top right.
 - **Forecast:** tomorrow's parcels per block from the chosen model, next to the usual
   count for that weekday, plus a rough courier count and each model's test accuracy.
   It needs the trained models: see [`ml/`](../ml/).
-- **Data → Simulated** reads `data/sim_parcels.csv` instead of MySQL, for working on the
-  dashboard without the database.
+- **Simulated** (top right) reads `data/sim_parcels.csv` instead of MySQL, for working on
+  the dashboard without the database.
 
-DB errors show only the error type, not the message, because a bad `DB_URL` can echo
-part of the password onto the page.
+### API
+
+| Endpoint | Parameters | Returns |
+|---|---|---|
+| `GET /api/live` | `source=db\|sim`, `scope=latest\|today\|all` | `kpis`, `by_block`, `arrivals`, `recent` (50), `faults` (50) |
+| `GET /api/forecast` | `source=db\|sim`, `model=poisson\|xgb\|baseline` | `date`, `blocks` (predicted, usual weekday, today, last week), `metrics` |
+
+Database errors return `503` with only the error type, never the message, because a bad
+`DB_URL` can echo part of the password.

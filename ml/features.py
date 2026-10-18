@@ -52,7 +52,11 @@ def load_history(source: str = "both") -> pd.DataFrame:
         return load_sim()
     if source == "db":
         return load_db()
-    sim, real = load_sim(), load_db()
+    return merge_history(load_sim(), load_db())
+
+
+def merge_history(sim: pd.DataFrame, real: pd.DataFrame) -> pd.DataFrame:
+    """Real events on the days the prototype ran, simulated traffic on every other day."""
     real_days = real["arrived_at"].dt.normalize().unique()
     return pd.concat([sim[~sim["arrived_at"].dt.normalize().isin(real_days)], real],
                      ignore_index=True)
