@@ -77,13 +77,14 @@ def main() -> None:
     ap.add_argument("--test-days", type=int, default=42)
     args = ap.parse_args()
 
+    source = args.source
     try:
-        parcels = load_history(args.source)
+        parcels = load_history(source)
     except Exception as e:
-        if args.source != "both":
+        if source != "both":
             raise
         print(f"database unavailable ({type(e).__name__}), training on simulated data only")
-        parcels = load_history("sim")
+        source, parcels = "sim", load_history("sim")
     feats = make_features(daily_counts(parcels))
     cutoff = feats["date"].max() - pd.Timedelta(days=args.test_days)
     train, test = feats[feats["date"] <= cutoff], feats[feats["date"] > cutoff]
@@ -106,7 +107,7 @@ def main() -> None:
     table = pd.DataFrame(metrics).T
     print(table.to_string(float_format=lambda x: f"{x:.3f}"))
     (MODEL_DIR / "metrics.json").write_text(json.dumps(
-        {"source": args.source, "test_days": args.test_days,
+        {"source": source, "test_days": args.test_days,
          "trained_until": f"{feats['date'].max():%Y-%m-%d}", "models": metrics}, indent=2))
     preds.to_csv(MODEL_DIR / "test_predictions.csv", index=False)
     print(f"\nmodels, metrics.json and test_predictions.csv saved to {MODEL_DIR}")

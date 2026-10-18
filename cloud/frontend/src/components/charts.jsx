@@ -56,6 +56,7 @@ export function ByBlockChart({ rows, pal }) {
 }
 
 const TICK_FORMAT = {
+  "10 s": { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false },
   minute: { hour: "2-digit", minute: "2-digit", hour12: false },
   hour: { hour: "2-digit", minute: "2-digit", hour12: false },
   day: { day: "numeric", month: "short" },

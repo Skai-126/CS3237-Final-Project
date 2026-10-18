@@ -16,6 +16,7 @@ ZONES = ["A", "B", "MANUAL"]
 PARCEL_COLS = [f.name for f in Parcel._meta.fields]
 FAULT_COLS = ["id", "session", "source", "type", "seq", "detail", "at"]
 RECENT = 50
+BUCKETS = {"10 s": "10s", "minute": "1min", "hour": "1h", "day": "1D"}  # arrivals chart
 
 
 def records(df: pd.DataFrame) -> list[dict]:
@@ -72,10 +73,10 @@ def live(source: str, scope: str) -> dict:
     arrivals, freq = [], None
     if not p.empty:
         span = p["arrived_at"].max() - p["arrived_at"].min()
-        freq = ("minute" if span < pd.Timedelta(hours=2)
+        freq = ("10 s" if span < pd.Timedelta(minutes=10)
+                else "minute" if span < pd.Timedelta(hours=2)
                 else "hour" if span < pd.Timedelta(days=2) else "day")
-        s = p.set_index("arrived_at")["seq"].resample({"minute": "1min", "hour": "1h",
-                                                       "day": "1D"}[freq]).count()
+        s = p.set_index("arrived_at")["seq"].resample(BUCKETS[freq]).count()
         arrivals = records(s.rename("count").rename_axis("t").reset_index())
 
     return {

@@ -164,8 +164,8 @@ function ForecastSection({ fc, model, setModel, pal }) {
                     ]}
                   />
                   <p className="muted small">
-                    MAE = average miss in parcels per block per day. Trained on {SOURCE_TEXT[d.metrics.source]}
-                    up to {d.metrics.trained_until}.
+                    MAE = average miss in parcels per block per day. Trained on {SOURCE_TEXT[d.metrics.source]} up
+                    to {d.metrics.trained_until}.
                   </p>
                 </>
               ) : (
