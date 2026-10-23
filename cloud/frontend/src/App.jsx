@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { usePolling } from "./api.js";
 import { ArrivalsChart, ByBlockChart, ForecastChart } from "./components/charts.jsx";
+import { ModelInfoModal } from "./components/modelInfo.jsx";
 import { Card, Empty, Segmented, Table, Tile, fmtTime } from "./components/ui.jsx";
 import { usePalette } from "./theme.js";
 
@@ -115,6 +116,7 @@ function ZoneTag({ zone, pal, pending }) {
 }
 
 function ForecastSection({ fc, model, setModel, pal }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   const d = fc.data;
   const date = d ? new Date(d.date) : null;
   const weekday = date?.toLocaleDateString("en-SG", { weekday: "long" });
@@ -129,13 +131,18 @@ function ForecastSection({ fc, model, setModel, pal }) {
           Forecast for{" "}
           {date ? date.toLocaleDateString("en-SG", { weekday: "long", day: "numeric", month: "short" }) : "tomorrow"}
         </h2>
-        <label className="select">
-          Model
-          <select value={model} onChange={(e) => setModel(e.target.value)}>
-            {Object.entries(MODELS).map(([v, t]) => <option key={v} value={v}>{t}</option>)}
-          </select>
-        </label>
+        <div className="forecast-controls">
+          <label className="select">
+            Model
+            <select value={model} onChange={(e) => setModel(e.target.value)}>
+              {Object.entries(MODELS).map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+            </select>
+          </label>
+          <button className="info-btn" onClick={() => setInfoOpen(true)}>ⓘ How the models work</button>
+        </div>
       </header>
+      <ModelInfoModal open={infoOpen} onClose={() => setInfoOpen(false)}
+                      model={model} setModel={setModel} metrics={d?.metrics} />
 
       {fc.error && <div className="banner">⚠ {fc.error}</div>}
       {d && (

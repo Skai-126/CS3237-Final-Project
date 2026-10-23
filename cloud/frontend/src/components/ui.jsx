@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 export function Segmented({ label, value, options, onChange }) {
   return (
     <div className="segmented" role="radiogroup" aria-label={label}>
@@ -37,6 +39,33 @@ export function Card({ title, subtitle, children, wide }) {
       </header>
       {children}
     </section>
+  );
+}
+
+/** Native <dialog>: Esc, focus trapping and the backdrop come from the browser. */
+export function Modal({ open, onClose, title, children }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (open && !d.open) d.showModal();
+    else if (!open && d.open) d.close();
+  }, [open]);
+  return (
+    <dialog
+      ref={ref}
+      className="modal"
+      aria-labelledby="modal-title"
+      onClose={onClose}
+      onClick={(e) => e.target === ref.current && onClose()} // click on the backdrop
+    >
+      <div className="modal-inner">
+        <header>
+          <h2 id="modal-title">{title}</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+        </header>
+        <div className="modal-body">{children}</div>
+      </div>
+    </dialog>
   );
 }
 

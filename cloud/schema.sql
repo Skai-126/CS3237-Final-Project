@@ -48,3 +48,16 @@ CREATE TABLE IF NOT EXISTS faults (
   detail  VARCHAR(255),
   at      DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
 );
+
+-- Append-only log of every MQTT message the subscriber receives, stored raw. Never
+-- updated, so parcels / faults can be rebuilt from it if a row is overwritten or lost.
+CREATE TABLE IF NOT EXISTS events (
+  id       BIGINT AUTO_INCREMENT PRIMARY KEY,
+  session  VARCHAR(32),                 -- subscriber's session after handling the message
+  topic    VARCHAR(64) NOT NULL,
+  payload  TEXT,                        -- as received; not always JSON (status, bad input)
+  retained BOOLEAN NOT NULL DEFAULT FALSE,
+  at       DATETIME(3) NOT NULL,
+  KEY idx_session (session),
+  KEY idx_at (at)
+);

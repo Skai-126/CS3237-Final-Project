@@ -14,6 +14,10 @@ Stores every parcel event and shows live counts, faults and forecasts.
 MySQL 8.4 (Community Server), running on Shu Kai's laptop. Schema: [`schema.sql`](schema.sql)
 — see [Event schema](#event-schema) below for the table layout.
 
+Besides `parcels` and `faults`, the subscriber appends every MQTT message it receives,
+raw, to `events` (never updated or deleted). If a parcel row is ever overwritten or lost,
+it can be rebuilt from there: `SELECT * FROM events WHERE session = '...' ORDER BY id`.
+
 Teammates connect with HeidiSQL to `<tailscale-ip>:3306` using the read-only `viewer`
 account (ask Shu Kai for the password). Don't port-forward 3306 on a home router.
 

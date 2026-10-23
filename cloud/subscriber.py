@@ -68,6 +68,16 @@ def insert_fault(conn, session: str | None, msg: dict, at: datetime) -> None:
     )
 
 
+def insert_event(conn, session: str | None, topic: str, payload: bytes, retained: bool,
+                 at: datetime) -> None:
+    conn.execute(
+        text("INSERT INTO events (session, topic, payload, retained, at) "
+             "VALUES (:session, :topic, :payload, :retained, :at)"),
+        {"session": session, "topic": topic, "payload": payload.decode(errors="replace"),
+         "retained": retained, "at": at},
+    )
+
+
 class Subscriber:
     def __init__(self, engine):
         self.engine = engine
@@ -75,7 +85,15 @@ class Subscriber:
 
     def handle(self, topic: str, payload: bytes, retained: bool = False) -> None:
         now = datetime.now()
+        try:
+            self._handle(topic, payload, retained, now)
+        finally:
+            # raw copy in its own transaction, kept even if the message was rejected or
+            # its parcels / faults write failed; logged after so it gets any new session
+            with self.engine.begin() as conn:
+                insert_event(conn, self.session, topic, payload, retained, now)
 
+    def _handle(self, topic: str, payload: bytes, retained: bool, now: datetime) -> None:
         if topic.endswith("/status"):
             state = payload.decode(errors="replace").strip()
             log.info("%s is %s", topic.split("/")[1], state)
