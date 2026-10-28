@@ -73,9 +73,20 @@ To decode a QR code saved as an image:
 py gateway/scanner.py --image path\to\label.png --seq 17 --flips 0
 ```
 
-The script currently prints the scan event. MQTT connection and live camera
-capture are the next implementation steps after the team confirms the message
-contract and the printed-label tests pass.
+`scanner.py` only prints the scan event. To run the gateway on MQTT, use
+`bridge.py`: it subscribes to Node 1's arrivals, reads the QR from the camera,
+publishes a flip if none is found, then publishes the scan event built by
+`make_scan_event()`:
+
+```powershell
+py gateway/bridge.py --camera http://<phone-ip>:8080/video   # phone IP-camera app
+py gateway/bridge.py --camera 0                              # laptop webcam
+py gateway/bridge.py --manual                                # type the QR JSON per parcel
+```
+
+`--window` (default 3 s) is how long it looks for a QR per attempt and
+`--max-flips` (default 1) how many flips it asks for. Keep
+`window × (max-flips + 1)` well under Node 1's scan timeout.
 
 ## Configuration and security
 

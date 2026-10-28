@@ -133,6 +133,11 @@ warning instead of crashing. If it restarts while Node 1 is still up, it continu
 latest session, but only if that session saw a parcel in the last 10 minutes.
 Otherwise it starts a new one, so a Node 1 reboot can't overwrite old rows.
 
+**Integration checker:** `python check_integration.py` watches `zonesort/#` during
+bring-up, flags any message that breaks this schema (wrong zone values, null rules, missing
+status, a reused `seq`, two scans for one parcel, parcels not scanned or sorted in time) and,
+on Ctrl+C, prints arrival → scan → sort latencies. `--csv latencies.csv` saves them for the report.
+
 **Testing without hardware:** with a broker running (`mosquitto -v`) and the subscriber
 up, run `python fake_events.py -n 20`. It publishes a fake run (unreadable labels,
 unknown floors, timeouts and missed parcels included) in exactly the schema's format.
