@@ -1,219 +1,178 @@
-# ZoneSort – Node 2 (conveyor & sorting) wiring
-# DRAFT pin map – confirm with firmware (Thomas & Daniel) before wiring.
+# ZoneSort – Node 2 (feeder + conveyor + sorting) wiring
+# Confirmed pinout as of 2026-10-30 (Gate A = G18 + CH11, Gate B = G19 + CH15). Hat label Pn = GPIOn.
 # Render:  wireviz node2_wiring.yml   -> node2_wiring.svg / .png / .html (BOM)
 
 metadata:
-  title: ZoneSort Node 2 – Conveyor & Sorting Wiring (draft)
+  title: ZoneSort Node 2 – Feeder, Conveyor & Sorting Wiring
 
 connectors:
-  ADP1:
-    type: 5 V 2 A adapter #1
-    subtype: servo rail, 1000 µF cap across +5V/GND
-    pinlabels: [+5V, GND]
-  ADP2:
-    type: 5 V 2 A adapter #2
-    subtype: motor rail, 1000 µF cap across +5V/GND
-    pinlabels: [+5V, GND]
-
   ESP32:
-    type: ESP32-WROOM-32 DevKit
-    subtype: Node 2 (USB powered)
-    pinlabels: [GND, 3V3, GPIO21, GPIO22, GPIO25, GPIO26, GPIO27, GPIO32, GPIO33, GPIO34, GPIO35]
-    pincolors: [BK, RD, BU, YE, GN, GN, VT, OG, OG, OG, OG]
+    type: ESP32-WROOM-32 DevKit (38-pin)
+    subtype: USB-C powered (2 A charger)
+    pinlabels: [GND, 3V3, 5V, G18, G19, G21, G22, G25, G26]
+    pincolors: [BK, RD, OG, VT, VT, BU, YE, GN, GN]
 
   PCA9685:
     type: PCA9685 16-ch servo driver
-    subtype: logic header
+    subtype: logic header (I2C 0x40)
     pinlabels: [GND, VCC, SDA, SCL]
   PCA_PWR:
     type: PCA9685
     subtype: V+ screw terminal (servo power)
     pinlabels: [V+, GND]
+    notes: 1000 µF capacitor across V+ / GND (stripe to GND)
   PCA_OUT:
     type: PCA9685
-    subtype: servo headers CH0–CH3
-    pinlabels: [CH0, CH1, CH2, CH3]
+    subtype: servo outputs
+    pinlabels: [CH0, CH11, CH15]
 
   SERVO_PUSH:
-    type: Servo – funnel pusher
-    pinlabels: [PWM]
-  SERVO_FLIP:
-    type: Servo – flipper
+    type: MG90S – feeder pusher
     pinlabels: [PWM]
   SERVO_A:
-    type: Servo – gate Zone A
+    type: MG90S – gate A diverter
     pinlabels: [PWM]
   SERVO_B:
-    type: Servo – gate Zone B
+    type: MG90S – gate B diverter
     pinlabels: [PWM]
+
+  TOF:
+    type: VL53L0X ToF
+    subtype: I2C 0x29, on belt (parcel entry + length timing)
+    pinlabels: [VIN, GND, SDA, SCL]
+
+  KY1:
+    type: KY-032 IR obstacle – gate B
+    subtype: EN unconnected (jumper on)
+    pinlabels: [+, GND, OUT]
+  KY2:
+    type: KY-032 IR obstacle – gate A
+    subtype: EN unconnected (jumper on)
+    pinlabels: [+, GND, OUT]
+
+  ADP12:
+    type: 12 V 2 A adapter
+    pinlabels: [+12V, GND]
+  BUCK:
+    type: Buck converter
+    subtype: set OUT to 9.5 V before connecting
+    pinlabels: [IN+, IN-, OUT+, OUT-]
 
   DRV8833:
     type: DRV8833 motor driver
+    subtype: VM max 10.8 V · ULT unconnected
     pinlabels: [VM, GND, EEP, AIN1, AIN2, AOUT1, AOUT2]
   MOTOR:
-    type: N20 worm gear motor
-    subtype: 6 V, 0.1 µF across tabs
-    pinlabels: [M+, M-]
-
-  IR_GATE_A:
-    type: IR sensor – before gate A
-    pinlabels: [VCC, GND, OUT]
-  IR_GATE_B:
-    type: IR sensor – before gate B
-    pinlabels: [VCC, GND, OUT]
-  IR_BIN_A:
-    type: IR sensor – bin A arrival
-    pinlabels: [VCC, GND, OUT]
-  IR_BIN_B:
-    type: IR sensor – bin B arrival
-    pinlabels: [VCC, GND, OUT]
-
-  BUZZER:
-    type: Active buzzer
-    pinlabels: [+, '-']
-
+    type: N20 worm gear motor (12 V)
+    subtype: belt drive roller
+    pinlabels: [M1, M2]
 
 cables:
-  W_I2C:
+  W_PCA:
     category: bundle
     wirecount: 4
     colors: [BK, RD, BU, YE]
   W_SERVO_PWR:
     category: bundle
     wirecount: 2
-    colors: [RD, BK]
-    notes: Servo V+ and GND come from the PCA9685 V+ rail (adapter 1)
+    colors: [OG, BK]
+    notes: ESP32 5V pin to PCA V+ terminal
   W_SERVO:
     category: bundle
+    wirecount: 3
+    colors: [OG, OG, OG]
+    notes: Signal shown; each servo plug also carries V+ and GND from the PCA header
+  W_TOF:
+    category: bundle
     wirecount: 4
-    colors: [OG, OG, OG, OG]
-    notes: Signal wires; each servo plug also carries V+ and GND from the PCA9685 header
-  W_MOTOR_PWR:
+    colors: [RD, BK, BU, YE]
+  W_KY1:
+    category: bundle
+    wirecount: 3
+    colors: [RD, BK, VT]
+  W_KY2:
+    category: bundle
+    wirecount: 3
+    colors: [RD, BK, VT]
+  W_12V:
     category: bundle
     wirecount: 2
     colors: [RD, BK]
-  W_MOTOR_CTRL:
+  W_9V:
     category: bundle
-    wirecount: 3
-    colors: [RD, GN, GN]
+    wirecount: 2
+    colors: [RD, BK]
+  W_DRV_CTRL:
+    category: bundle
+    wirecount: 4
+    colors: [BK, RD, GN, GN]
+    notes: GND ties ESP32 ground to the motor supply ground
   W_MOTOR:
     category: bundle
     wirecount: 2
     colors: [WH, WH]
-  W_GND_TIE:
-    category: bundle
-    wirecount: 2
-    colors: [BK, BK]
-    notes: Common ground – ESP32 GND tied to both adapter grounds
-  W_IR:
-    category: bundle
-    wirecount: 4
-    colors: [OG, OG, OG, OG]
-    notes: IR modules powered from ESP32 3V3 so outputs stay 3.3 V-safe
-  W_IR_PWR:
-    category: bundle
-    wirecount: 8
-    colors: [RD, BK, RD, BK, RD, BK, RD, BK]
-  W_BUZ:
-    category: bundle
-    wirecount: 2
-    colors: [VT, BK]
 
 connections:
-  # I2C to PCA9685 (logic powered from ESP32 3V3)
+  # I2C bus: PCA9685 logic
   -
-    - ESP32: [GND, 3V3, GPIO21, GPIO22]
-    - W_I2C: [1-4]
+    - ESP32: [GND, 3V3, G21, G22]
+    - W_PCA: [1-4]
     - PCA9685: [GND, VCC, SDA, SCL]
 
-  # Servo power rail: adapter 1 -> PCA9685 V+ terminal
+  # I2C bus: ToF (shares G21/G22)
   -
-    - ADP1: [+5V, GND]
+    - ESP32: [3V3, GND, G21, G22]
+    - W_TOF: [1-4]
+    - TOF: [VIN, GND, SDA, SCL]
+
+  # Servo power from ESP32 5V pin
+  -
+    - ESP32: [5V, GND]
     - W_SERVO_PWR: [1-2]
     - PCA_PWR: [V+, GND]
 
-  # Servo signals (PCA9685 CH0-CH3)
+  # Servo signals
   -
     - PCA_OUT: [CH0]
     - W_SERVO: [1]
     - SERVO_PUSH: [PWM]
   -
-    - PCA_OUT: [CH1]
+    - PCA_OUT: [CH11]
     - W_SERVO: [2]
-    - SERVO_FLIP: [PWM]
-  -
-    - PCA_OUT: [CH2]
-    - W_SERVO: [3]
     - SERVO_A: [PWM]
   -
-    - PCA_OUT: [CH3]
-    - W_SERVO: [4]
+    - PCA_OUT: [CH15]
+    - W_SERVO: [3]
     - SERVO_B: [PWM]
 
-  # Motor power rail: adapter 2 -> DRV8833
+  # IR obstacle sensors
   -
-    - ADP2: [+5V, GND]
-    - W_MOTOR_PWR: [1-2]
+    - ESP32: [3V3, GND, G19]
+    - W_KY1: [1-3]
+    - KY1: [+, GND, OUT]
+  -
+    - ESP32: [3V3, GND, G18]
+    - W_KY2: [1-3]
+    - KY2: [+, GND, OUT]
+
+  # Motor power: 12 V -> buck (9.5 V) -> DRV8833
+  -
+    - ADP12: [+12V, GND]
+    - W_12V: [1-2]
+    - BUCK: [IN+, IN-]
+  -
+    - BUCK: [OUT+, OUT-]
+    - W_9V: [1-2]
     - DRV8833: [VM, GND]
 
-  # Motor control from ESP32 (EEP pulled high to enable)
+  # Motor control from ESP32 (EEP held high to enable)
   -
-    - ESP32: [3V3, GPIO25, GPIO26]
-    - W_MOTOR_CTRL: [1-3]
-    - DRV8833: [EEP, AIN1, AIN2]
+    - ESP32: [GND, 3V3, G25, G26]
+    - W_DRV_CTRL: [1-4]
+    - DRV8833: [GND, EEP, AIN1, AIN2]
 
   # Motor output
   -
     - DRV8833: [AOUT1, AOUT2]
     - W_MOTOR: [1-2]
-    - MOTOR: [M+, M-]
-
-  # Common ground: ESP32 GND tied to both adapter grounds
-  -
-    - ESP32: [GND]
-    - W_GND_TIE: [1]
-    - ADP1: [GND]
-  -
-    - ESP32: [GND]
-    - W_GND_TIE: [2]
-    - ADP2: [GND]
-
-  # IR sensors: OUT to ESP32 GPIO, powered from 3V3
-  -
-    - ESP32: [GPIO32]
-    - W_IR: [1]
-    - IR_GATE_A: [OUT]
-  -
-    - ESP32: [3V3, GND]
-    - W_IR_PWR: [1, 2]
-    - IR_GATE_A: [VCC, GND]
-  -
-    - ESP32: [GPIO33]
-    - W_IR: [2]
-    - IR_GATE_B: [OUT]
-  -
-    - ESP32: [3V3, GND]
-    - W_IR_PWR: [3, 4]
-    - IR_GATE_B: [VCC, GND]
-  -
-    - ESP32: [GPIO34]
-    - W_IR: [3]
-    - IR_BIN_A: [OUT]
-  -
-    - ESP32: [3V3, GND]
-    - W_IR_PWR: [5, 6]
-    - IR_BIN_A: [VCC, GND]
-  -
-    - ESP32: [GPIO35]
-    - W_IR: [4]
-    - IR_BIN_B: [OUT]
-  -
-    - ESP32: [3V3, GND]
-    - W_IR_PWR: [7, 8]
-    - IR_BIN_B: [VCC, GND]
-
-  # Buzzer
-  -
-    - ESP32: [GPIO27, GND]
-    - W_BUZ: [1-2]
-    - BUZZER: [+, '-']
+    - MOTOR: [M1, M2]
