@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 
 export function Segmented({ label, value, options, onChange }) {
   return (
@@ -45,6 +45,7 @@ export function Card({ title, subtitle, children, wide }) {
 /** Native <dialog>: Esc, focus trapping and the backdrop come from the browser. */
 export function Modal({ open, onClose, title, children }) {
   const ref = useRef(null);
+  const titleId = useId(); // several dialogs can be on the page at once
   useEffect(() => {
     const d = ref.current;
     if (open && !d.open) d.showModal();
@@ -54,13 +55,13 @@ export function Modal({ open, onClose, title, children }) {
     <dialog
       ref={ref}
       className="modal"
-      aria-labelledby="modal-title"
+      aria-labelledby={titleId}
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()} // click on the backdrop
     >
       <div className="modal-inner">
         <header>
-          <h2 id="modal-title">{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </header>
         <div className="modal-body">{children}</div>

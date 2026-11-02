@@ -126,6 +126,10 @@ Then start the dashboard: see [Dashboard](#dashboard).
 
 Credentials go in `.env` (gitignored); [`.env.example`](.env.example) shows the shape.
 [`db.py`](db.py) is the shared connection helper for the subscriber, ML and dashboard.
+[`mqtt_conn.py`](mqtt_conn.py) does the same for MQTT: the team broker needs TLS on port 8883,
+a login, and its certificate ([`server.crt`](server.crt), set as `MQTT_CA_CERT`). If TLS fails
+with *unable to get local issuer certificate*, an antivirus is scanning the connection. In Avast:
+Core Shields → settings → Web Guard → untick *Scan web traffic of uncommon applications*.
 
 [`subscriber.py`](subscriber.py) listens on `zonesort/#` and upserts into `parcels` /
 `faults`. It drops malformed messages (bad JSON, missing `seq`, unknown zone) with a
@@ -178,6 +182,10 @@ Open http://localhost:8000.
 - **Forecast:** tomorrow's parcels per block from the chosen model, next to the usual
   count for that weekday, plus a rough courier count and each model's test accuracy.
   It needs the trained models: see [`ml/`](../ml/).
+- **Settings** (top right): training data, test period and the Poisson / XGBoost settings, with
+  ranges checked on save. **Retrain** runs in the background (a few seconds); the old models stay in
+  use until the new ones are saved, then the page shows each model's accuracy before → after. Also
+  sets parcels per courier for the courier count.
 - **Simulated** (top right) reads `data/sim_parcels.csv` instead of MySQL, for working on
   the dashboard without the database.
 
@@ -187,6 +195,8 @@ Open http://localhost:8000.
 |---|---|---|
 | `GET /api/live` | `source=db\|sim`, `scope=latest\|today\|all` | `kpis`, `by_block`, `arrivals`, `recent` (50), `faults` (50) |
 | `GET /api/forecast` | `source=db\|sim`, `model=poisson\|xgb\|baseline` | `date`, `blocks` (predicted, usual weekday, today, last week), `metrics` |
+| `GET/POST /api/ml/config` | POST a JSON object of changed settings | `values`, `defaults`, `params` (labels, ranges, help), `trained_with` |
+| `GET/POST /api/ml/train` | POST starts a run with the saved settings (`409` if one is running) | `state` (`idle`/`running`/`done`/`error`), `log`, `previous` and new `metrics` |
 
 Database errors return `503` with only the error type, never the message, because a bad
 `DB_URL` can echo part of the password.

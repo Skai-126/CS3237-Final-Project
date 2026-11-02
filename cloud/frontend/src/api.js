@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 
-async function getJson(path, params) {
-  const res = await fetch(`${path}?${new URLSearchParams(params)}`);
+async function parse(res) {
   const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;
+}
+
+export async function getJson(path, params = {}) {
+  return parse(await fetch(`${path}?${new URLSearchParams(params)}`));
+}
+
+export async function postJson(path, body = {}) {
+  return parse(await fetch(path, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }));
 }
 
 /** Fetches `path` now, whenever `params` change, and every `everyMs` (0 = once). */

@@ -2,48 +2,79 @@ import { useState } from "react";
 import { usePolling } from "./api.js";
 import { ArrivalsChart, ByBlockChart, ForecastChart } from "./components/charts.jsx";
 import { ModelInfoModal } from "./components/modelInfo.jsx";
+import { PageInfoModal } from "./components/pageInfo.jsx";
+import { SettingsPage } from "./components/settings.jsx";
 import { Card, Empty, Segmented, Table, Tile, fmtTime } from "./components/ui.jsx";
 import { usePalette } from "./theme.js";
 
 const LIVE_MS = 5000;
 const FORECAST_MS = 60000;
-const PARCELS_PER_COURIER = 40; // assumed round size for one courier; adjust to taste
+const DEFAULT_PER_COURIER = 40; // until /api/ml/config answers
 
 const MODELS = { poisson: "Poisson regression", xgb: "XGBoost", baseline: "Same-weekday average" };
 const SCOPES = [["latest", "Latest session"], ["today", "Today"], ["all", "All time"]];
 const SOURCES = [["db", "Live database"], ["sim", "Simulated"]];
+const VIEWS = [["dashboard", "Dashboard"], ["settings", "Settings"]];
 const SOURCE_TEXT = { sim: "simulated data", db: "real data", both: "simulated + real data" };
 
 export default function App() {
   const [source, setSource] = useState("db");
   const [scope, setScope] = useState("latest");
   const [model, setModel] = useState("poisson");
+  const [view, setView] = useState("dashboard");
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [configRev, setConfigRev] = useState(0); // bumped after a save, to re-read settings
+  const [modelRev, setModelRev] = useState(0);   // bumped after retraining, to re-read the forecast
   const pal = usePalette();
 
   const live = usePolling("/api/live", { source, scope }, source === "db" ? LIVE_MS : 0);
-  const fc = usePolling("/api/forecast", { source, model }, FORECAST_MS);
+  const fc = usePolling("/api/forecast", { source, model, rev: modelRev }, FORECAST_MS);
+  const config = usePolling("/api/ml/config", { rev: configRev }, 0);
+  const perCourier = config.data?.values.parcels_per_courier ?? DEFAULT_PER_COURIER;
 
   return (
-    <div className="page">
-      <header className="top">
-        <div className="brand">
-          <h1>ZoneSort</h1>
-          <span className={`live-dot ${live.error ? "down" : ""}`} aria-hidden />
-          <span className="muted">
-            {live.error ? "Not updating" : live.at ? `Updated ${fmtTime(live.at.toISOString())}` : "Loading…"}
-          </span>
+    <>
+      <nav className="topnav" aria-label="Main">
+        <div className="topnav-inner">
+          <div className="brand">
+            <h1>ZoneSort</h1>
+            <span className={`live-dot ${live.error ? "down" : ""}`} aria-hidden />
+            <span className="muted status">
+              {live.error ? "Not updating" : live.at ? `Updated ${fmtTime(live.at.toISOString())}` : "Loading…"}
+            </span>
+          </div>
+          <div className="nav-tabs">
+            {VIEWS.map(([v, text]) => (
+              <button key={v} className={view === v ? "on" : ""} aria-current={view === v ? "page" : undefined}
+                      onClick={() => setView(v)}>
+                {text}
+              </button>
+            ))}
+          </div>
+          <button className="info-btn" aria-label="About this page" onClick={() => setInfoOpen(true)}>
+            ⓘ<span className="label"> About this page</span>
+          </button>
         </div>
-        <div className="controls">
-          <Segmented label="Data source" value={source} options={SOURCES} onChange={setSource} />
-          <Segmented label="Time range" value={scope} options={SCOPES} onChange={setScope} />
-        </div>
-      </header>
+      </nav>
+      <PageInfoModal page={view} open={infoOpen} onClose={() => setInfoOpen(false)} />
 
-      {live.error && <div className="banner">⚠ {live.error}</div>}
-      {live.data && <LiveSection d={live.data} pal={pal} />}
+      <div className="page">
+        {view === "settings" ? (
+          <SettingsPage onSaved={() => setConfigRev((r) => r + 1)} onTrained={() => setModelRev((r) => r + 1)} />
+        ) : (
+          <>
+            <div className="toolbar">
+              <Segmented label="Data source" value={source} options={SOURCES} onChange={setSource} />
+              <Segmented label="Time range" value={scope} options={SCOPES} onChange={setScope} />
+            </div>
+            {live.error && <div className="banner">⚠ {live.error}</div>}
+            {live.data && <LiveSection d={live.data} pal={pal} />}
 
-      <ForecastSection fc={fc} model={model} setModel={setModel} pal={pal} />
-    </div>
+            <ForecastSection fc={fc} model={model} setModel={setModel} pal={pal} perCourier={perCourier} />
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -115,7 +146,7 @@ function ZoneTag({ zone, pal, pending }) {
   );
 }
 
-function ForecastSection({ fc, model, setModel, pal }) {
+function ForecastSection({ fc, model, setModel, pal, perCourier }) {
   const [infoOpen, setInfoOpen] = useState(false);
   const d = fc.data;
   const date = d ? new Date(d.date) : null;
@@ -151,8 +182,8 @@ function ForecastSection({ fc, model, setModel, pal }) {
             <Tile label="Expected parcels" value={Math.round(total)} />
             <Tile label={`Vs. usual ${weekday}`} value={`${total - usual >= 0 ? "+" : ""}${Math.round(total - usual)}`} />
             <Tile label="Busiest block" value={busiest ? `${busiest.block} · ${Math.round(busiest.predicted)}` : "—"} />
-            <Tile label={`Couriers (≈ ${PARCELS_PER_COURIER} parcels each)`}
-                  value={Math.max(1, Math.ceil(Math.round(total) / PARCELS_PER_COURIER))} />
+            <Tile label={`Couriers (≈ ${perCourier} parcels each)`}
+                  value={Math.max(1, Math.ceil(Math.round(total) / perCourier))} />
           </div>
           <div className="grid">
             <Card title="Parcels per block">

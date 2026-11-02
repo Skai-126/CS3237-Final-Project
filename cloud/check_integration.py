@@ -11,7 +11,6 @@ Usage:
 import argparse
 import csv
 import json
-import os
 import statistics
 import time
 from collections import Counter
@@ -19,6 +18,8 @@ from datetime import datetime
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
+
+from mqtt_conn import connect
 
 load_dotenv()
 
@@ -213,7 +214,7 @@ def main() -> None:
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="zonesort-checker")
     client.on_connect = on_connect
     client.on_message = lambda c, u, m: checker.handle(m.topic, m.payload, m.retain)
-    client.connect(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
+    connect(client)
     client.loop_start()
     try:
         while True:

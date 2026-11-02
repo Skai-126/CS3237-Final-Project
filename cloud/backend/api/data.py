@@ -6,9 +6,12 @@ from functools import lru_cache
 
 import pandas as pd
 
+from django.db.models import Count, Max, Min
+
 from features import daily_counts, load_sim, merge_history
 from forecast import forecast
 from train import MODEL_DIR
+from train_config import SCALE_REAL, load_config
 
 from .models import Fault, Parcel
 
@@ -43,7 +46,8 @@ def load_db(scope: str) -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
 
 
 @lru_cache(maxsize=1)
-def _sim() -> pd.DataFrame:
+def _sim(day: date) -> pd.DataFrame:
+    """Simulated parcels up to `day` (cached per day: load_sim extends the file to today)."""
     p = load_sim()
     for c in ("scanned_at", "sorted_at"):
         p[c] = pd.to_datetime(p[c])
@@ -51,7 +55,7 @@ def _sim() -> pd.DataFrame:
 
 
 def load_simulated(scope: str) -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
-    p, session = _sim(), None
+    p, session = _sim(date.today()), None
     if scope == "latest":
         session = p["session"].iloc[-1]
         p = p[p["session"] == session]
@@ -103,6 +107,17 @@ _forecast_cache: dict[tuple, tuple[float, dict]] = {}
 FORECAST_TTL_S = 60
 
 
+def clear_forecast_cache() -> None:
+    """Called after saving settings that change the forecast's input."""
+    _forecast_cache.clear()
+
+
+def clear_caches() -> None:
+    """Called after retraining or remaking the pretend data."""
+    _forecast_cache.clear()
+    _sim.cache_clear()
+
+
 def next_day(source: str, model: str) -> dict:
     """Tomorrow's forecast per block, cached for a minute (it re-reads all history)."""
     key = (source, model, date.today())
@@ -111,15 +126,17 @@ def next_day(source: str, model: str) -> dict:
         return hit[1]
 
     tomorrow = date.today() + timedelta(days=1)
-    history = load_sim()
+    daily = daily_counts(_sim(date.today()), end=date.today())
     if source == "db":  # through Django, so the API needs only one DB connection setup
-        real = Parcel.objects.filter(arrived_at__isnull=False).values(
-            "session", "seq", "block", "scan", "zone", "arrived_at")
+        cfg = load_config()  # same test-run exclusions and scaling as training
+        real = (Parcel.objects.filter(arrived_at__isnull=False)
+                .exclude(session__in=cfg["exclude_sessions"])
+                .values("session", "seq", "block", "scan", "zone", "arrived_at"))
         real = pd.DataFrame.from_records(real, columns=["session", "seq", "block", "scan",
                                                         "zone", "arrived_at"])
         real["arrived_at"] = pd.to_datetime(real["arrived_at"])
-        history = merge_history(history, real)
-    fc = forecast(daily_counts(history, end=date.today()), model, tomorrow)
+        daily = merge_history(daily, real, SCALE_REAL[cfg["real_scale"]])
+    fc = forecast(daily, model, tomorrow)
     metrics_file = MODEL_DIR / "metrics.json"
     result = {
         "date": tomorrow.isoformat(), "model": model,
@@ -128,3 +145,15 @@ def next_day(source: str, model: str) -> dict:
     }
     _forecast_cache[key] = (time.monotonic(), result)
     return result
+
+
+def sessions() -> list[dict]:
+    """Every recorded session, newest first, for marking test runs on the Settings page."""
+    rows = (Parcel.objects.filter(arrived_at__isnull=False).values("session")
+            .annotate(parcels=Count("id"), first=Min("arrived_at"), last=Max("arrived_at"))
+            .order_by("-first"))
+    blocks = {}
+    for r in Parcel.objects.exclude(block__isnull=True).values("session", "block").distinct():
+        blocks.setdefault(r["session"], []).append(r["block"])
+    return [{**r, "first": r["first"].isoformat(), "last": r["last"].isoformat(),
+             "blocks": sorted(blocks.get(r["session"], []))} for r in rows]

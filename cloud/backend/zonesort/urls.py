@@ -20,6 +20,9 @@ def index(request):
 urlpatterns = [
     path("api/live", views.live),
     path("api/forecast", views.forecast),
+    path("api/ml/config", views.ml_config),
+    path("api/ml/train", views.ml_train),
+    path("api/ml/sessions", views.ml_sessions),
     re_path(r"^assets/(?P<path>.*)$", serve, {"document_root": FRONTEND_DIST / "assets"}),
     path("", index),
 ]

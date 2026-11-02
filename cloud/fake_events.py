@@ -6,12 +6,13 @@ Usage:
 """
 import argparse
 import json
-import os
 import random
 import time
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
+
+from mqtt_conn import connect
 
 load_dotenv()
 
@@ -28,7 +29,7 @@ def main() -> None:
     args = ap.parse_args()
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="zonesort-fake")
-    client.connect(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
+    connect(client)
     client.loop_start()
 
     def pub(topic, msg, **kw):

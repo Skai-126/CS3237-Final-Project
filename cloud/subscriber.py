@@ -7,7 +7,6 @@ Usage:
 """
 import json
 import logging
-import os
 from datetime import datetime
 
 import paho.mqtt.client as mqtt
@@ -15,6 +14,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 
 from db import get_engine
+from mqtt_conn import connect
 
 load_dotenv()
 log = logging.getLogger("subscriber")
@@ -160,7 +160,7 @@ def main() -> None:
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="zonesort-cloud")
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
+    connect(client)
     client.loop_forever()
 
 

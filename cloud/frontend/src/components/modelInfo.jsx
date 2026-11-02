@@ -34,10 +34,10 @@ const EXPLAINERS = [
   {
     key: "xgb",
     name: "XGBoost",
-    tagline: "Hundreds of small rules of thumb",
-    how: "Builds 400 small yes/no flowcharts (“Sale day? → Block 124? → Yesterday above 40?”). "
+    tagline: "Many small rules of thumb",
+    how: "Builds TREES small yes/no flowcharts (“Sale day? → Block 124? → Yesterday above 40?”). "
       + "Each new one fixes the mistakes of the ones before, and their answers are added up.",
-    analogy: "A committee of 400, each knowing one small pattern, the later ones focused on "
+    analogy: "A committee of TREES, each knowing one small pattern, the later ones focused on "
       + "cases the earlier ones got wrong.",
     good: "The most flexible. Finds combinations of clues the checklist can't.",
     bad: "Hard to explain a single guess, and needs lots of history or it learns noise.",
@@ -47,6 +47,8 @@ const EXPLAINERS = [
 export function ModelInfoModal({ open, onClose, model, setModel, metrics }) {
   const scores = metrics?.models ?? {};
   const best = Object.entries(scores).sort((a, b) => a[1].mae - b[1].mae)[0]?.[0];
+  const trees = String(metrics?.config?.xgb_n_estimators ?? 400); // set on the Settings page
+  const fill = (text) => text?.replaceAll("TREES", trees);
 
   return (
     <Modal open={open} onClose={onClose} title="How the forecast models work">
@@ -79,8 +81,8 @@ export function ModelInfoModal({ open, onClose, model, setModel, metrics }) {
                   ? <span className="pill">In use</span>
                   : <button className="link-btn" onClick={() => setModel(m.key)}>Use this model</button>}
               </header>
-              <p>{m.how}</p>
-              <p className="analogy">{m.analogy}</p>
+              <p>{fill(m.how)}</p>
+              <p className="analogy">{fill(m.analogy)}</p>
               <ul className="pros-cons">
                 <li><span className="good">＋</span>{m.good}</li>
                 <li><span className="bad">−</span>{m.bad}</li>
