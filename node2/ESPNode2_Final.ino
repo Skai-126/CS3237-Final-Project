@@ -96,6 +96,7 @@ constexpr uint8_t WIRE_ASSIGNMENT = 1;
 constexpr uint8_t WIRE_PAUSE = 2;
 constexpr uint8_t WIRE_RESUME = 3;
 constexpr uint8_t WIRE_STOP = 4;
+constexpr uint8_t WIRE_BIN_ARRIVED = 5; // Node 1 bin IR fired; zone = which bin
 
 struct WirePacket {
   uint32_t parcelId;
@@ -418,6 +419,12 @@ void processWirelessPacket(const uint8_t *sender, const uint8_t *bytes, int leng
     case WIRE_PAUSE: ev.type = EventType::Pause; break;
     case WIRE_RESUME: ev.type = EventType::Resume; break;
     case WIRE_STOP: ev.type = EventType::Stop; break;
+    case WIRE_BIN_ARRIVED:
+      // Same as typing "BIN A" / "BIN B" / "BIN M" in the serial monitor.
+      if (!validZone(msg.zone)) return;
+      ev.type = EventType::BinArrival;
+      ev.bin = msg.zone;
+      break;
     default: return;
   }
 
