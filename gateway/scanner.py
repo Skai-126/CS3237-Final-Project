@@ -10,19 +10,28 @@ import time
 from typing import Any
 
 
-# Keep this list in sync with the exact block names produced by the label site.
-KNOWN_BLOCKS = {"123", "123A", "124", "125", "126", "127", "128", "708"}
+# The destination zone is determined by the block, not the floor.
+# Blocks missing from this mapping are sent to MANUAL.
+BLOCK_TO_ZONE = {
+    "123": "A",
+    "124": "A",
+    "125": "A",
+    "126": "A",
+    "127": "A",
+    "128": "B",
+    "129": "B",
+    "130": "B",
+    "131": "B",
+    "132": "B",
+}
+
+KNOWN_BLOCKS = set(BLOCK_TO_ZONE)
 
 
-def zone_for(block: str, floor: int) -> str:
-    """Return the sorting zone for a known block and supported floor."""
-    if block not in KNOWN_BLOCKS:
-        return "MANUAL"
-    if 1 <= floor <= 5:
-        return "A"
-    if 6 <= floor <= 10:
-        return "B"
-    return "MANUAL"
+def zone_for(block: str) -> str:
+    """Return the sorting zone assigned to a block, or MANUAL if unmapped."""
+    normalized_block = block.strip().upper()
+    return BLOCK_TO_ZONE.get(normalized_block, "MANUAL")
 
 
 # Code 128 value encoded in the barcode, for example:
@@ -141,7 +150,8 @@ def make_scan_event(seq: int, raw_label: str | None) -> dict[str, Any]:
         )
 
         if valid_fields and candidate_block in KNOWN_BLOCKS:
-            mapped_zone = zone_for(candidate_block, candidate_floor)
+            # Floor is retained in the event, but it does not affect routing.
+            mapped_zone = zone_for(candidate_block)
 
             if mapped_zone != "MANUAL":
                 parcel_id = candidate_id

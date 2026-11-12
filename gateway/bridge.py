@@ -8,6 +8,9 @@ import os
 import ssl
 import threading
 import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 import cv2
 import paho.mqtt.client as mqtt
@@ -18,6 +21,9 @@ from scanner import decode_barcode_from_frame, make_scan_event
 
 SCAN_TOPIC = "zonesort/gateway/scan"
 STATUS_TOPIC = "zonesort/gateway/status"
+
+# A new identifier separates sequence numbers from different bridge runs.
+SESSION_ID = uuid.uuid4().hex
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 load_dotenv(SCRIPT_DIR / ".env")
@@ -151,11 +157,19 @@ def main() -> None:
             print(f"Publishing scan events to {SCAN_TOPIC}")
 
     client.on_connect = on_connect
-    client.on_message = on_message
-    client.connect(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
-    client.loop_start()
+
+    seq = args.seq
+    active_label: str | None = None
+    missing_since: float | None = None
 
     try:
+        client.connect(broker_host, broker_port, keepalive=60)
+        client.loop_start()
+
+        print(f"Using MQTT broker {broker_host}:{broker_port}")
+        print(f"Session ID: {SESSION_ID}")
+        print("Continuous scanning started. Press Ctrl+C to stop.")
+
         while True:
             label_text = camera.read_label()
             now = time.monotonic()
@@ -163,13 +177,14 @@ def main() -> None:
             if label_text:
                 missing_since = None
 
-                # Publish this label only once while it remains in view.
+                # Publish a label once while it remains in view.
                 if label_text != active_label:
-                    # Without a Node 1 arrival sensor, this is when the
-                    # camera first detects the label, not physical arrival.
+                    # This is the time the camera detects the label,
+                    # not physical parcel-arrival time.
                     arrival_time = utc_timestamp()
 
                     event = make_scan_event(seq, label_text)
+                    event["session_id"] = SESSION_ID
                     event["arrival_time"] = arrival_time
                     event["scan_time"] = utc_timestamp()
 
