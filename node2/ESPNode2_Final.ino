@@ -32,6 +32,8 @@
 #include <Wire.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <esp_mac.h>
+#include <esp_err.h>
 #include <esp_arduino_version.h>
 #include <cstring>
 #include <atomic>
@@ -150,21 +152,16 @@ void rememberId(uint32_t id) {
 }
 
 // ----------- Hardware -----------
-// Main conveyor motor
+// Main conveyor motor (can be added for safety)
 void setMotor(bool run) {
   if (motorRunning == run) return;
   motorRunning = run;
-  Serial.printf("[MOTOR SIM] %s\n", run ? "RUNNING" : "STOPPED");
-  // Real hardware: command Node 2's motor driver here.
 }
 
 // Servo motors
 void positionGates(char zone) {
   pca.writeMicroseconds(GATE_A_CH, zone == 'A' ? GATE_A_DIVERT_US : GATE_A_PASS_US);
   pca.writeMicroseconds(GATE_B_CH, zone == 'B' ? GATE_B_DIVERT_US : GATE_B_PASS_US);
-  if (zone == 'A')      Serial.println(">> Zone A: Gate A swung RIGHT (divert), Gate B pass");
-  else if (zone == 'B') Serial.println(">> Zone B: Gate A pass, Gate B swung LEFT (divert)");
-  else                  Serial.println(">> Manual: both gates in PASS");
 }
 
 // Pusher servo
@@ -438,6 +435,7 @@ void onEspNowReceive(const uint8_t *mac, const uint8_t *data, int len) {
 
 void initializeEspNow() {
   WiFi.mode(WIFI_STA);
+
   WiFi.disconnect();
   if (esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE) != ESP_OK) {
     Serial.println("[FATAL] Failed to set ESP-NOW channel");
@@ -535,10 +533,14 @@ void communicationTask(void *parameter) {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  uint8_t stationMac[6] = {};
+  const esp_err_t macResult = esp_read_mac(stationMac, ESP_MAC_WIFI_STA);
+  if (macResult == ESP_OK) {
+    Serial.printf("ZoneSort Node 2 station MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                  stationMac[0], stationMac[1], stationMac[2],
+                  stationMac[3], stationMac[4], stationMac[5]);
+  }
   Wire.begin(21, 22);
-  WiFi.mode(WIFI_STA);
-  Serial.print("ESP32 Wi-Fi station MAC: ");
-  Serial.println(WiFi.macAddress());
 
   // Check for PCA
   Wire.beginTransmission(0x40);
@@ -570,9 +572,7 @@ void setup() {
   }
 
   initializeEspNow();
-
-  Serial.println("ZoneSort Node 2 — Event-driven multi-parcel simulator ready!");
-  Serial.println("Switches on bin IR.");
+  Serial.println("System is Ready");
   Serial.println("Commands: START STOP PAUSE RESUME STATUS JAM RESET");
   Serial.println("Assignment: A B M");
   Serial.println("Confirmation: BIN A, BIN B, BIN M");
