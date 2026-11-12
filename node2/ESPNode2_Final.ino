@@ -50,16 +50,22 @@ const int GATE_A_CH = 11;
 const int GATE_B_CH = 15;
 const int PUSHER_CH = 0;
 const int SERVO_LEFT_US  = 2450;   // 90 deg left   (swap with RIGHT if directions are reversed)
-const int SERVO_RIGHT_US = 550;    // 90 deg right
+const int SERVO_RIGHT_US = 1750;    // 90 deg right
+constexpr uint32_t PUSH_INTERVAL_MS = 5000;
+constexpr uint32_t PUSH_HOLD_MS = 500;
+bool pusherExtended = false;
+bool pusherTimerStarted = false;
+uint32_t pusherStartedMs = 0;
+uint32_t nextPushMs = 0;
 
-const int GATE_A_PASS_US   = SERVO_LEFT_US;
-const int GATE_A_DIVERT_US = SERVO_RIGHT_US;
+const int GATE_A_PASS_US   = SERVO_RIGHT_US;
+const int GATE_A_DIVERT_US = SERVO_LEFT_US;
 
 const int GATE_B_PASS_US   = SERVO_RIGHT_US;
 const int GATE_B_DIVERT_US = SERVO_LEFT_US;
 
-const int PUSHER_HOME_US = 2450;
-const int PUSHER_PUSH_US = 550;
+const int PUSHER_HOME_US = 2000;
+const int PUSHER_PUSH_US = 2300;
 
 struct Parcel {
   uint32_t id;
@@ -162,10 +168,36 @@ void positionGates(char zone) {
 }
 
 // Pusher servo
-void push() {
-  Serial.println(">> Pusher: push");
-  pca.writeMicroseconds(PUSHER_CH, PUSHER_PUSH_US); delay(500);
-  pca.writeMicroseconds(PUSHER_CH, PUSHER_HOME_US); delay(300);
+void updatePusher() {
+  uint32_t now = millis();
+
+  // Start the interval timer
+  if (!pusherTimerStarted) {
+    nextPushMs = now + PUSH_INTERVAL_MS;
+    pusherTimerStarted = true;
+  }
+
+  // Pusher is currently extended
+  if (pusherExtended) {
+    if (now - pusherStartedMs >= PUSH_HOLD_MS) {
+      pca.writeMicroseconds(
+        PUSHER_CH, PUSHER_HOME_US
+      );
+      pusherExtended = false;
+    }
+    return;
+  }
+
+  // Time for the next push?
+  if ((int32_t)(now - nextPushMs) >= 0) {
+    pca.writeMicroseconds(
+      PUSHER_CH, PUSHER_PUSH_US
+    );
+    pusherExtended = true;
+    pusherStartedMs = now;
+    // Schedule next push
+    nextPushMs = now + PUSH_INTERVAL_MS;
+  }
 }
 
 // Alarm for faults if needed
@@ -349,6 +381,8 @@ void controlTask(void *parameter) {
     }
 
     updateBeltClock();
+
+    updatePusher();
     if (!faulted && activeValid) {
       if (servoSettling && millis() - servoMoveStartedMs >= SERVO_SETTLE_MS) {
         servoSettling = false;
