@@ -51,8 +51,8 @@ Adafruit_PWMServoDriver pca(0x40);
 const int GATE_A_CH = 11;
 const int GATE_B_CH = 15;
 const int PUSHER_CH = 0;
-const int SERVO_LEFT_US  = 2450;   // 90 deg left   (swap with RIGHT if directions are reversed)
-const int SERVO_RIGHT_US = 1750;    // 90 deg right
+const int SERVO_LEFT_US  = 2450;   // 90 deg left
+const int SERVO_RIGHT_US = 1750;    // Original position
 constexpr uint32_t PUSH_HOLD_MS = 500;
 constexpr uint32_t PUSH_RETURN_MS = 500;
 
@@ -191,11 +191,16 @@ void updatePusher() {
     pusherReturning = false;
   }
 
+  // One request exists only for the newly active parcel.
+  if (!armed || paused || faulted || servoSettling) return;
+
   if (pendingPushes > 0) {
     --pendingPushes;
     pca.writeMicroseconds(PUSHER_CH, PUSHER_PUSH_US);
     pusherExtended = true;
     pusherStartedMs = now;
+    Serial.printf("[PUSHER] Feeding active parcel %lu (zone %c)\n",
+                  (unsigned long)active.id, active.zone);
   }
 }
 
@@ -264,6 +269,11 @@ void startNextIfIdle() {
   Serial.printf("[ACTIVE] Parcel %lu -> Zone %c\n",
                 (unsigned long)active.id, active.zone);
   positionGates(active.zone);
+
+  // Exactly one push is requested when this parcel becomes active. Queued assignments do not request additional pushes.
+  pendingPushes = 1;
+  Serial.printf("[PUSHER] Ready to feed active parcel %lu; waiting for gates\n",
+                (unsigned long)active.id);
 }
 
 void resetController() {
@@ -283,6 +293,10 @@ void resetController() {
   recentIdPosition = 0;
   xQueueReset(assignmentQueue);
   pendingPushes = 0;
+  pusherExtended = false;
+  pusherReturning = false;
+  pusherStartedMs = 0;
+  pca.writeMicroseconds(PUSHER_CH, PUSHER_HOME_US);
   positionGates('M'); // Safe pass-through default for simulator only
   Serial.println("[RESET] Tracking cleared. Confirm conveyor is physically clear, then START.");
   // faultCount intentionally not cleared (session diagnostics).
@@ -325,7 +339,7 @@ void controlTask(void *parameter) {
               break;
             }
             rememberId(p.id);
-            ++pendingPushes;
+            // Do not push here: this assignment might be waiting in the FIFO.
             Serial.printf("[QUEUED] Parcel %lu -> %c; pending=%u\n",
                           (unsigned long)p.id, p.zone,
                           (unsigned)uxQueueMessagesWaiting(assignmentQueue));
@@ -341,13 +355,12 @@ void controlTask(void *parameter) {
               Serial.printf("[SORTED] Parcel %lu confirmed in bin %c\n",
                             (unsigned long)active.id, ev.bin);
               reportEvent("sorted", active);
-              ++pendingPushes;
+              // startNextIfIdle() below requests the next push, if a parcel is waiting.
               ++sortedCount;
               lastCompletedId = active.id;
               activeValid = false;
               servoSettling = false;
-              // Correct bin confirmation is the ONLY normal trigger to
-              // switch to the following parcel's diverter arrangement.
+              // Correct bin confirmation is the ONLY normal trigger to switch servo arrangement.
               startNextIfIdle();
             }
             break;
