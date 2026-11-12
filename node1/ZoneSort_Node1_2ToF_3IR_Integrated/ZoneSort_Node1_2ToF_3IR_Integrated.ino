@@ -5,7 +5,6 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_idf_version.h>  // ESP-NOW callback compatibility
-#include <HX711.h>
 #include <PubSubClient.h>
 #include <Wire.h>
 #include <VL53L0X.h>
@@ -23,8 +22,8 @@ uint8_t NODE2_MAC[6] = {
 
 // Set these to the Wi-Fi network shared with the MQTT broker.
 // Set these to the Wi-Fi network shared with the MQTT broker.
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID = "Thomas iphone16 Promax";
+const char* WIFI_PASSWORD = "cherrytomato";
 
 // Friend 2's broker address, port and MQTT topic.
 const char* MQTT_SERVER = "119.74.242.100"; // IP in the supplied TLS certificate; confirm broker public IP
@@ -40,7 +39,7 @@ const char* MQTT_TOPIC_FAULT = "zonesort/fault";  // [OVERSIZE] shared fault top
 // If the broker has authentication, fill these in.
 // Leave blank for an anonymous broker.
 const char* MQTT_USER = "esp32"; // edit if broker username differs
-const char* MQTT_PASSWORD = "YOUR_MQTT_PASSWORD"; // enter broker password locally; do not commit credentials
+const char* MQTT_PASSWORD = "esp32thomas"; // enter broker password locally; do not commit credentials
 
 // Both Node 1 and Node 2 must use the Wi-Fi access point's channel.
 // Do not force ESP-NOW channel 1 after connecting to Wi-Fi.
@@ -99,16 +98,20 @@ OeDaW/9o5xbT01J6qNZ7GHAA2+Q2CKDpZJzfIWx+PBtks5yQPqfGprgZBDE12xfL
 const int TOP_BASELINE_MM = 200;
 const int SIDE_BASELINE_MM = 250;
 // Measure actual belt speed (mm/s) before trusting box length.
-const float CONVEYOR_SPEED_MM_S = 100.0f;
+const float CONVEYOR_SPEED_MM_S = 35.0f;
 const int BOX_HEIGHT_TRIGGER_MM = 20;
 const int BOX_WIDTH_TRIGGER_MM = 15;
 const uint8_t BOX_CONFIRM_SAMPLES = 3;
 const uint32_t BIN_IR_DEBOUNCE_MS = 60;
+// [FLICKER] After a bin IR triggers, ignore that sensor for this long so a
+// flickering beam counts as one parcel, not many. Parcels into the same bin
+// are several seconds apart at 35 mm/s, so a real parcel is never missed.
+const uint32_t BIN_IR_LOCKOUT_MS = 2000;
 const uint32_t TOF_PRINT_INTERVAL_MS = 1000;
-// [OVERSIZE] Largest box the chute and bins accept (mm). Set these from the real chute.
+// [OVERSIZE] Largest box the chute and bins accept (mm). Set these from the real chute.  
 const int MAX_LENGTH_MM = 300;
-const int MAX_WIDTH_MM = 200;
-const int MAX_HEIGHT_MM = 150;
+const int MAX_WIDTH_MM = 60;   // 6 cm
+const int MAX_HEIGHT_MM = 60;  // 6 cm
 
 VL53L0X topToF;
 VL53L0X sideToF;
@@ -122,8 +125,6 @@ bool tofReady = false;
 
 // Calibrate before using actual HX711
 #define CALIBRATION_FACTOR 1.0f
-
-HX711 scale;
 
 // =====================================
 // 2. NODE 2 ESP-NOW PROTOCOL
@@ -212,6 +213,7 @@ struct BinArrivalEvent {
 QueueHandle_t dimensionsQueue;
 QueueHandle_t binArrivalQueue;
 QueueHandle_t oversizeQueue;  // [OVERSIZE] measured boxes over the limits
+QueueHandle_t unmatchedQueue; // [UNMATCHED] bin IR fired with no parcel expected there
 
 struct ScanEvent {
   uint32_t seq;
@@ -404,6 +406,10 @@ void reportBinEntry(uint8_t index, char zone) {
   if (xQueueSend(binArrivalQueue, &event, 0) != pdTRUE)
     Serial.println("[Bin] MQTT bin arrival queue full");
 
+  // [UNMATCHED] Nothing was sent to this bin: report it as a fault too.
+  if (!matched && xQueueSend(unmatchedQueue, &event, 0) != pdTRUE)
+    Serial.println("[Bin] MQTT fault queue full");
+
   Serial.printf("[BIN %c] IR%d triggered; seq=%lu (%s); ESP-NOW queued=%s\n",
                 zone, index + 1, (unsigned long)seq,
                 matched ? "matched" : "unmatched", queued ? "YES" : "NO");
@@ -415,6 +421,9 @@ void binIrTask(void* parameter) {
   const char zones[3] = { 'A', 'B', 'M' };
   uint8_t stable[3], lastRaw[3];
   uint32_t lastChange[3];
+  uint32_t lastTrigger[3] = {0, 0, 0};          // [FLICKER]
+  bool triggered[3] = {false, false, false};    // [FLICKER] waiting for "beam clear"
+  uint32_t ignored[3] = {0, 0, 0};              // [FLICKER] flickers ignored per trigger
 
   for (int i = 0; i < 3; i++) {
     pinMode(irPins[i], INPUT);
@@ -432,8 +441,23 @@ void binIrTask(void* parameter) {
       }
       if (raw != stable[i] && now - lastChange[i] >= BIN_IR_DEBOUNCE_MS) {
         stable[i] = raw;
-        if (raw == LOW) reportBinEntry(i, zones[i]);
-        else Serial.printf("[BIN %c] beam clear\n", zones[i]);
+        if (raw == LOW) {
+          // [FLICKER] Only the first block within the lockout counts as a parcel.
+          if (lastTrigger[i] != 0 && now - lastTrigger[i] < BIN_IR_LOCKOUT_MS) {
+            ++ignored[i];
+          } else {
+            if (ignored[i] > 0)
+              Serial.printf("[BIN %c] ignored %lu flicker(s) after last trigger\n",
+                            zones[i], (unsigned long)ignored[i]);
+            ignored[i] = 0;
+            lastTrigger[i] = now;
+            triggered[i] = true;
+            reportBinEntry(i, zones[i]);
+          }
+        } else if (triggered[i]) {
+          triggered[i] = false;
+          Serial.printf("[BIN %c] beam clear\n", zones[i]);
+        }
       }
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -462,9 +486,20 @@ void sensorTask(void* parameter) {
     now = millis();
 
     if (now - lastToFPrint >= TOF_PRINT_INTERVAL_MS) {
-      Serial.printf("[ToF] TOP=%u %s | SIDE=%u %s | box=%s\n",
-                    top.raw, top.valid ? "OK" : (top.timeout ? "TIMEOUT" : "INVALID"),
-                    side.raw, side.valid ? "OK" : (side.timeout ? "TIMEOUT" : "INVALID"),
+      // Live reading: height = how far the top surface is above the belt,
+      // width = how far the box sticks out towards the side sensor.
+      char heightText[16], widthText[16];
+      if (top.valid)
+        snprintf(heightText, sizeof(heightText), "%d mm", max(0, TOP_BASELINE_MM - (int)top.raw));
+      else
+        snprintf(heightText, sizeof(heightText), "%s", top.timeout ? "TIMEOUT" : "INVALID");
+      if (side.valid)
+        snprintf(widthText, sizeof(widthText), "%d mm", max(0, SIDE_BASELINE_MM - (int)side.raw));
+      else
+        snprintf(widthText, sizeof(widthText), "%s", side.timeout ? "TIMEOUT" : "INVALID");
+
+      Serial.printf("[ToF] height=%s width=%s | raw TOP=%u SIDE=%u mm | box=%s\n",
+                    heightText, widthText, top.raw, side.raw,
                     boxActive ? "YES" : "NO");
       lastToFPrint = now;
     }
@@ -847,6 +882,20 @@ void mqttTask(void* parameter) {
         (unsigned long)big.measurementId);
       if (mqttClient.publish(MQTT_TOPIC_FAULT, payload)) {
         xQueueReceive(oversizeQueue, &big, 0);
+        Serial.printf("[MQTT] Fault: %s\n", payload);
+      }
+    }
+
+    // [UNMATCHED] Bin IR fired but no parcel was assigned to that bin.
+    BinArrivalEvent stray;
+    if (xQueuePeek(unmatchedQueue, &stray, 0) == pdTRUE) {
+      char payload[200];
+      snprintf(payload, sizeof(payload),
+        "{\"source\":\"node1\",\"type\":\"bin_unmatched\",\"seq\":null,"
+        "\"detail\":\"IR%u fired at bin %c but no parcel was sent there\"}",
+        (unsigned)stray.sensor, stray.zone);
+      if (mqttClient.publish(MQTT_TOPIC_FAULT, payload)) {
+        xQueueReceive(unmatchedQueue, &stray, 0);
         Serial.printf("[MQTT] Fault: %s\n", payload);
       }
     }
@@ -1365,6 +1414,7 @@ void setup() {
   dimensionsQueue = xQueueCreate(12, sizeof(DimensionEvent));
   binArrivalQueue = xQueueCreate(12, sizeof(BinArrivalEvent));
   oversizeQueue = xQueueCreate(6, sizeof(DimensionEvent));  // [OVERSIZE]
+  unmatchedQueue = xQueueCreate(6, sizeof(BinArrivalEvent));  // [UNMATCHED]
   pendingA = xQueueCreate(12, sizeof(uint32_t));
   pendingB = xQueueCreate(12, sizeof(uint32_t));
   pendingM = xQueueCreate(12, sizeof(uint32_t));
@@ -1382,6 +1432,7 @@ void setup() {
       !dimensionsQueue ||
       !binArrivalQueue ||
       !oversizeQueue ||
+      !unmatchedQueue ||
       !pendingA || !pendingB || !pendingM ||
       !systemEvents) {
 
