@@ -35,6 +35,7 @@ const char* MQTT_TOPIC_PROCESSED = "zonesort/node1/processed";
 // New non-retained telemetry topics (Node 1 publishes)
 const char* MQTT_TOPIC_DIMENSIONS = "zonesort/node1/dimensions";
 const char* MQTT_TOPIC_BIN_ARRIVAL = "zonesort/node1/bin_arrival";
+const char* MQTT_TOPIC_FAULT = "zonesort/fault";  // [OVERSIZE] shared fault topic
 
 // If the broker has authentication, fill these in.
 // Leave blank for an anonymous broker.
@@ -104,6 +105,10 @@ const int BOX_WIDTH_TRIGGER_MM = 15;
 const uint8_t BOX_CONFIRM_SAMPLES = 3;
 const uint32_t BIN_IR_DEBOUNCE_MS = 60;
 const uint32_t TOF_PRINT_INTERVAL_MS = 1000;
+// [OVERSIZE] Largest box the chute and bins accept (mm). Set these from the real chute.
+const int MAX_LENGTH_MM = 300;
+const int MAX_WIDTH_MM = 200;
+const int MAX_HEIGHT_MM = 150;
 
 VL53L0X topToF;
 VL53L0X sideToF;
@@ -150,6 +155,13 @@ static_assert(
 
 struct ParcelEvent {
   uint32_t id;
+};
+
+// Moved up from section 5A so Arduino's generated prototypes can see it.
+struct ToFResult {
+  uint16_t raw;
+  bool timeout;
+  bool valid;
 };
 
 struct WeightResult {
@@ -199,6 +211,7 @@ struct BinArrivalEvent {
 };
 QueueHandle_t dimensionsQueue;
 QueueHandle_t binArrivalQueue;
+QueueHandle_t oversizeQueue;  // [OVERSIZE] measured boxes over the limits
 
 struct ScanEvent {
   uint32_t seq;
@@ -360,12 +373,6 @@ bool setupToFSensors() {
   return true;
 }
 
-struct ToFResult {
-  uint16_t raw;
-  bool timeout;
-  bool valid;
-};
-
 ToFResult readToF(VL53L0X& sensor) {
   ToFResult r;
   r.raw = sensor.readRangeContinuousMillimeters();
@@ -515,6 +522,15 @@ void sensorTask(void* parameter) {
           event.widthMm = sideSeen ? maxWidth : -1;
           if (xQueueSend(dimensionsQueue, &event, 0) != pdTRUE)
             Serial.println("[ToF] MQTT dimensions queue full");
+          // [OVERSIZE] widthMm is -1 when the side sensor saw nothing; that never counts.
+          bool oversize = event.lengthMm > MAX_LENGTH_MM ||
+                          event.widthMm > MAX_WIDTH_MM ||
+                          event.heightMm > MAX_HEIGHT_MM;
+          if (oversize) {
+            Serial.printf("[ToF] OVERSIZE box id=%lu\n", (unsigned long)event.measurementId);
+            if (xQueueSend(oversizeQueue, &event, 0) != pdTRUE)
+              Serial.println("[ToF] MQTT fault queue full");
+          }
           Serial.printf("[DIM] id=%lu L=%.1f W=%d H=%d mm\n",
                         (unsigned long)event.measurementId, event.lengthMm,
                         event.widthMm, event.heightMm);
@@ -819,6 +835,25 @@ void mqttTask(void* parameter) {
       if (mqttClient.publish(MQTT_TOPIC_BIN_ARRIVAL, payload)) {
         xQueueReceive(binArrivalQueue, &bin, 0);
         Serial.printf("[MQTT] Bin arrival: %s\n", payload);
+      }
+    }
+
+    // [OVERSIZE] Fault in the shared schema; removed only after the broker accepts it.
+    DimensionEvent big;
+    if (xQueuePeek(oversizeQueue, &big, 0) == pdTRUE) {
+      char widthText[12];
+      if (big.widthMm < 0) snprintf(widthText, sizeof(widthText), "?");
+      else snprintf(widthText, sizeof(widthText), "%d", big.widthMm);
+      char payload[240];
+      snprintf(payload, sizeof(payload),
+        "{\"source\":\"node1\",\"type\":\"oversize\",\"seq\":null,"
+        "\"detail\":\"box %.0fx%sx%d mm (LxWxH) over limit %dx%dx%d, measurement %lu\"}",
+        big.lengthMm, widthText, big.heightMm,
+        MAX_LENGTH_MM, MAX_WIDTH_MM, MAX_HEIGHT_MM,
+        (unsigned long)big.measurementId);
+      if (mqttClient.publish(MQTT_TOPIC_FAULT, payload)) {
+        xQueueReceive(oversizeQueue, &big, 0);
+        Serial.printf("[MQTT] Fault: %s\n", payload);
       }
     }
     vTaskDelay(pdMS_TO_TICKS(30));
@@ -1333,6 +1368,7 @@ void setup() {
   scanQueue = xQueueCreate(5, sizeof(MqttEvent));
   dimensionsQueue = xQueueCreate(12, sizeof(DimensionEvent));
   binArrivalQueue = xQueueCreate(12, sizeof(BinArrivalEvent));
+  oversizeQueue = xQueueCreate(6, sizeof(DimensionEvent));  // [OVERSIZE]
   pendingA = xQueueCreate(12, sizeof(uint32_t));
   pendingB = xQueueCreate(12, sizeof(uint32_t));
   pendingM = xQueueCreate(12, sizeof(uint32_t));
@@ -1349,6 +1385,7 @@ void setup() {
       !scanQueue ||
       !dimensionsQueue ||
       !binArrivalQueue ||
+      !oversizeQueue ||
       !pendingA || !pendingB || !pendingM ||
       !systemEvents) {
 
