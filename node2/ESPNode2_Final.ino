@@ -53,12 +53,13 @@ const int GATE_B_CH = 15;
 const int PUSHER_CH = 0;
 const int SERVO_LEFT_US  = 2450;   // 90 deg left   (swap with RIGHT if directions are reversed)
 const int SERVO_RIGHT_US = 1750;    // 90 deg right
-constexpr uint32_t PUSH_INTERVAL_MS = 5000;
 constexpr uint32_t PUSH_HOLD_MS = 500;
+constexpr uint32_t PUSH_RETURN_MS = 500;
+
 bool pusherExtended = false;
-bool pusherTimerStarted = false;
+bool pusherReturning = false;
 uint32_t pusherStartedMs = 0;
-uint32_t nextPushMs = 0;
+uint32_t pendingPushes = 0;
 
 const int GATE_A_PASS_US   = SERVO_RIGHT_US;
 const int GATE_A_DIVERT_US = SERVO_LEFT_US;
@@ -108,7 +109,7 @@ static_assert(sizeof(WirePacket) == 8, "Node 1 and Node 2 must use an 8-byte pac
 constexpr bool CHECK_NODE1_MAC = true;
 const uint8_t NODE1_MAC[6] = {
     0xB0, 0x3F, 0xD3,
-    0x5A, 0xF3, 0x90
+    0x5C, 0x4B, 0xAC
 };
 
 // Parcel queue overflow handle
@@ -166,34 +167,34 @@ void positionGates(char zone) {
 
 // Pusher servo
 void updatePusher() {
-  uint32_t now = millis();
+  const uint32_t now = millis();
 
-  // Start the interval timer
-  if (!pusherTimerStarted) {
-    nextPushMs = now + PUSH_INTERVAL_MS;
-    pusherTimerStarted = true;
+  if (faulted) {
+    pendingPushes = 0;
   }
 
-  // Pusher is currently extended
   if (pusherExtended) {
-    if (now - pusherStartedMs >= PUSH_HOLD_MS) {
-      pca.writeMicroseconds(
-        PUSHER_CH, PUSHER_HOME_US
-      );
+    if (faulted || now - pusherStartedMs >= PUSH_HOLD_MS) {
+      pca.writeMicroseconds(PUSHER_CH, PUSHER_HOME_US);
       pusherExtended = false;
+      pusherReturning = true;
+      pusherStartedMs = now;
     }
     return;
   }
 
-  // Time for the next push?
-  if ((int32_t)(now - nextPushMs) >= 0) {
-    pca.writeMicroseconds(
-      PUSHER_CH, PUSHER_PUSH_US
-    );
+  if (pusherReturning) {
+    if (now - pusherStartedMs < PUSH_RETURN_MS) {
+      return;
+    }
+    pusherReturning = false;
+  }
+
+  if (pendingPushes > 0) {
+    --pendingPushes;
+    pca.writeMicroseconds(PUSHER_CH, PUSHER_PUSH_US);
     pusherExtended = true;
     pusherStartedMs = now;
-    // Schedule next push
-    nextPushMs = now + PUSH_INTERVAL_MS;
   }
 }
 
@@ -280,6 +281,7 @@ void resetController() {
   for (uint8_t i = 0; i < RECENT_IDS_CAPACITY; ++i) recentIds[i] = 0;
   recentIdPosition = 0;
   xQueueReset(assignmentQueue);
+  pendingPushes = 0;
   positionGates('M'); // Safe pass-through default for simulator only
   Serial.println("[RESET] Tracking cleared. Confirm conveyor is physically clear, then START.");
   // faultCount intentionally not cleared (session diagnostics).
@@ -322,6 +324,7 @@ void controlTask(void *parameter) {
               break;
             }
             rememberId(p.id);
+            ++pendingPushes;
             Serial.printf("[QUEUED] Parcel %lu -> %c; pending=%u\n",
                           (unsigned long)p.id, p.zone,
                           (unsigned)uxQueueMessagesWaiting(assignmentQueue));
@@ -337,6 +340,7 @@ void controlTask(void *parameter) {
               Serial.printf("[SORTED] Parcel %lu confirmed in bin %c\n",
                             (unsigned long)active.id, ev.bin);
               reportEvent("sorted", active);
+              ++pendingPushes;
               ++sortedCount;
               lastCompletedId = active.id;
               activeValid = false;
