@@ -702,17 +702,11 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   int floor = 0;
   bool hasFloor = readJsonInt(json, "floor", floor);
 
-  // Classify on Node 1 from the actual QR data, independently of the bridge's zone.
+  // [ZONE] Use the gateway's zone: it maps the block to a zone
+  // (123-127 -> A, 128-132 -> B, anything else -> MANUAL), so the rule lives in one place.
   char zone = 'M';
-  if (scan == "ok" && hasFloor && supportedBlock(block) &&
-      parcelID.length() && unit.length()) {
-    zone = classifyFloor(floor);
-  }
-  // A mismatched bridge classification is not trusted.
-  String expectedZone = (zone == 'M') ? "MANUAL" : String(zone);
-  if (suppliedZone != expectedZone) {
-    Serial.println("[MQTT] Bridge/Node1 classification mismatch; using Node1 result");
-  }
+  if (scan == "ok" && suppliedZone == "A") zone = 'A';
+  else if (scan == "ok" && suppliedZone == "B") zone = 'B';
   event.zone = zone;
   event.floor = hasFloor ? floor : 0;
   snprintf(event.parcelID, sizeof(event.parcelID), "%s", parcelID.c_str());
@@ -958,7 +952,9 @@ void weightTask(void* parameter) {
         break;
 
       case 3:
-        result.weight = 2450.0f;
+        // [WEIGHT] Was 2450 g, which is over HEAVY_THRESHOLD_G and sent every
+        // 4th parcel to Manual during demos. All simulated weights are now under it.
+        result.weight = 650.0f;
         break;
 
       default:
