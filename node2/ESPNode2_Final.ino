@@ -536,6 +536,9 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   Wire.begin(21, 22);
+  WiFi.mode(WIFI_STA);
+  Serial.print("ESP32 Wi-Fi station MAC: ");
+  Serial.println(WiFi.macAddress());
 
   // Check for PCA
   Wire.beginTransmission(0x40);
