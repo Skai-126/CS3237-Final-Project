@@ -34,6 +34,10 @@ GitHub issue before changing a topic or field. Changing them now breaks everyone
 - **Sessions are set by the cloud subscriber, not the nodes.** Each time Node 1 comes
   online (`zonesort/node1/status` = `online`), the subscriber starts a new session
   (`YYYYMMDD-HHMMSS`). This means a reboot never reuses a `seq` in the same session.
+- **If only the gateway is on MQTT** (Nodes 1 and 2 talking over ESP-NOW only), the
+  subscriber copes: a scan with no `node1/arrival` uses the scan time as `arrived_at`
+  (the ML and the arrivals chart need it), and a scan for a `seq` already scanned in
+  this session starts a new session, since the gateway or Node 1 restarted counting.
 - **The nodes send no timestamps.** The ESP32s have no real clock. The subscriber stamps
   every event when it arrives, which is accurate to a few ms on the LAN.
 - Payloads are JSON with lower-case keys. Zones are always `A`, `B` or `MANUAL`.

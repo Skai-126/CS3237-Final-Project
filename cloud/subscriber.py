@@ -47,10 +47,18 @@ def recent_session(conn) -> str | None:
         "ORDER BY id DESC LIMIT 1"), {"mins": RESUME_MINUTES}).scalar()
 
 
-def upsert_parcel(conn, session: str, seq: int, fields: dict) -> None:
-    """Insert or update one parcel row, touching only the given columns."""
+def already_scanned(conn, session: str, seq: int) -> bool:
+    return conn.execute(text(
+        "SELECT 1 FROM parcels WHERE session = :session AND seq = :seq "
+        "AND scanned_at IS NOT NULL"), {"session": session, "seq": seq}).first() is not None
+
+
+def upsert_parcel(conn, session: str, seq: int, fields: dict, keep=()) -> None:
+    """Insert or update one parcel row, touching only the given columns.
+    Columns in `keep` are only filled in if the row doesn't have them yet."""
     cols = ["session", "seq", *fields]
-    updates = ", ".join(f"{c} = new.{c}" for c in fields) or "seq = new.seq"
+    updates = ", ".join(f"{c} = COALESCE(parcels.{c}, new.{c})" if c in keep else f"{c} = new.{c}"
+                        for c in fields) or "seq = new.seq"
     conn.execute(
         text(f"INSERT INTO parcels ({', '.join(cols)}) "
              f"VALUES ({', '.join(':' + c for c in cols)}) AS new "
@@ -132,7 +140,16 @@ class Subscriber:
                         return
                 fields = {k: msg.get(k) for k in allowed}
                 fields[ts_col] = now
-                upsert_parcel(conn, self.session, msg["seq"], fields)
+                keep = ()
+                if topic == "zonesort/gateway/scan":
+                    # Node 1 is on ESP-NOW only, so no node1/arrival or node1/status reaches
+                    # us: a repeated seq means the gateway restarted counting, and the scan
+                    # time (seconds after arrival) stands in for the arrival time
+                    if already_scanned(conn, self.session, msg["seq"]):
+                        self.session = new_session()
+                        log.info("seq %s seen again, starting session %s", msg["seq"], self.session)
+                    fields["arrived_at"], keep = now, ("arrived_at",)
+                upsert_parcel(conn, self.session, msg["seq"], fields, keep)
             elif topic == "zonesort/fault":
                 if "source" not in msg or "type" not in msg:
                     log.warning("fault missing source/type: %s", msg)

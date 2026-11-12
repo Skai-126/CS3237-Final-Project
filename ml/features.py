@@ -3,8 +3,7 @@
 Every feature for day d uses only counts up to d-1, so it is known the evening before
 (when the forecast is issued). The calendar feature (sale_lag) is known in advance.
 
-    parcels = load_history("both")    # simulated history + real prototype events
-    daily = daily_counts(parcels)     # one row per (date, block), zero-filled
+    daily = load_history("both")      # (date, block) counts: simulated + real prototype days
     feats = make_features(daily)      # training rows (first 28 days dropped)
 """
 import sys
@@ -32,34 +31,66 @@ def sale_lag(d: date) -> int:
 
 
 def load_sim(path: Path = SIM_CSV) -> pd.DataFrame:
+    """Simulated parcels, extended (and saved) up to today if the file is older."""
+    from simulate import extend  # simulate imports this module
+
     if not path.exists():
         raise FileNotFoundError(f"{path} not found: run `python ml/simulate.py` first")
-    return pd.read_csv(path, parse_dates=["arrived_at"])
+    df = pd.read_csv(path, parse_dates=["arrived_at"])
+    longer = extend(df, date.today(), path)
+    if len(longer) > len(df):
+        tmp = path.with_name(path.name + ".tmp")
+        longer.to_csv(tmp, index=False)
+        tmp.replace(path)
+    return longer
 
 
-def load_db() -> pd.DataFrame:
+def load_db(exclude=()) -> pd.DataFrame:
+    """Real parcels from MySQL, minus the sessions in `exclude` (test runs)."""
     sys.path.insert(0, str(ROOT / "cloud"))
     from db import get_engine
 
-    return pd.read_sql("SELECT session, seq, block, scan, zone, arrived_at FROM parcels "
+    real = pd.read_sql("SELECT session, seq, block, scan, zone, arrived_at FROM parcels "
                        "WHERE arrived_at IS NOT NULL", get_engine(), parse_dates=["arrived_at"])
+    return real[~real["session"].isin(list(exclude))]
 
 
-def load_history(source: str = "both") -> pd.DataFrame:
-    """source: 'sim', 'db', or 'both' (real events on days the prototype ran, simulated
-    traffic on every other day)."""
+def load_history(source: str = "both", exclude=(), scale: bool = True,
+                 end: date | None = None) -> pd.DataFrame:
+    """Daily counts per block. source: 'sim', 'db', or 'both' (real counts on the days the
+    prototype ran, simulated on every other day; see merge_history)."""
     if source == "sim":
-        return load_sim()
+        return daily_counts(load_sim(), end)
     if source == "db":
-        return load_db()
-    return merge_history(load_sim(), load_db())
+        return daily_counts(load_db(exclude), end)
+    return merge_history(daily_counts(load_sim(), end), load_db(exclude), scale)
 
 
-def merge_history(sim: pd.DataFrame, real: pd.DataFrame) -> pd.DataFrame:
-    """Real events on the days the prototype ran, simulated traffic on every other day."""
-    real_days = real["arrived_at"].dt.normalize().unique()
-    return pd.concat([sim[~sim["arrived_at"].dt.normalize().isin(real_days)], real],
-                     ignore_index=True)
+def merge_history(sim_daily: pd.DataFrame, real: pd.DataFrame, scale: bool = True) -> pd.DataFrame:
+    """Replace simulated counts with real ones on the days the prototype ran.
+
+    A demo run handles a few dozen parcels, not a block's whole day of deliveries. With
+    `scale`, each real day keeps its real split between blocks, but is scaled up so its
+    total matches that day's simulated total. Blocks the simulator doesn't know are dropped:
+    one day of counts is no history to forecast them from.
+    """
+    real = real.dropna(subset=["block", "arrived_at"])
+    real = real[real["block"].astype(str).isin(sim_daily["block"].unique())]
+    if real.empty:
+        return sim_daily
+    days = real["arrived_at"].dt.normalize()
+    counts = real.groupby([days.rename("date"), real["block"].astype(str)]).size()
+    grid = pd.MultiIndex.from_product([days.unique(), sorted(sim_daily["block"].unique())],
+                                      names=["date", "block"])
+    real_daily = counts.reindex(grid, fill_value=0).rename("count").reset_index()
+    sim_rest = sim_daily[~sim_daily["date"].isin(real_daily["date"])]
+    if scale:
+        sim_total = sim_daily.groupby("date")["count"].sum()
+        real_total = real_daily.groupby("date")["count"].transform("sum")
+        factor = real_daily["date"].map(sim_total) / real_total
+        real_daily["count"] = (real_daily["count"] * factor.fillna(1)).round().astype(int)
+    return (pd.concat([sim_rest, real_daily], ignore_index=True)
+            .sort_values(["date", "block"]).reset_index(drop=True))
 
 
 def daily_counts(parcels: pd.DataFrame, end: date | None = None) -> pd.DataFrame:

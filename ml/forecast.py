@@ -1,7 +1,7 @@
 """Live next-day forecast per block, from the models saved by train.py.
 
     from forecast import forecast
-    fc = forecast(daily)          # daily = features.daily_counts(...); predicts the next day
+    fc = forecast(daily)          # daily = features.load_history(...); predicts the next day
 
 Usage:
     python forecast.py                        # tomorrow, XGBoost, sim history + real events
@@ -13,8 +13,9 @@ from datetime import date, timedelta
 import joblib
 import pandas as pd
 
-from features import FEATURES, daily_counts, load_history, make_features
+from features import FEATURES, load_history, make_features
 from train import MODEL_DIR, SameWeekdayBaseline
+from train_config import SCALE_REAL, load_config
 
 
 def load_model(name: str = "xgb"):
@@ -41,14 +42,15 @@ def main() -> None:
     args = ap.parse_args()
 
     tomorrow = date.today() + timedelta(days=1)
+    cfg = load_config()
     try:
-        parcels = load_history(args.source)
+        daily = load_history(args.source, cfg["exclude_sessions"], SCALE_REAL[cfg["real_scale"]],
+                             end=date.today())
     except Exception as e:
         if args.source != "both":
             raise
         print(f"database unavailable ({type(e).__name__}), using simulated data only")
-        parcels = load_history("sim")
-    daily = daily_counts(parcels, end=date.today())
+        daily = load_history("sim", end=date.today())
     fc = forecast(daily, args.model, tomorrow)
     print(f"forecast for {tomorrow:%a %d %b %Y} ({args.model})")
     print(fc[["block", "predicted", "dow_avg"]].round(1).to_string(index=False))

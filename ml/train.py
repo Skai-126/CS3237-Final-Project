@@ -11,13 +11,16 @@ Evaluation is time-ordered: train on earlier days, test on the last --test-days 
   busiest  share of test days where the model picks the block that really was busiest
 
 The saved models are refit on every day (train + test) so live forecasts use all data.
+Settings (data source, test period, model hyperparameters) come from train_config.py and
+the dashboard's Settings page; command-line flags override them for one run.
 
 Usage:
-    python train.py                    # simulated history + real events (default)
+    python train.py                    # saved settings (default: simulated + real events)
     python train.py --source sim --test-days 56
 """
 import argparse
 import json
+import os
 from pathlib import Path
 
 import joblib
@@ -29,7 +32,8 @@ from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 from xgboost import XGBRegressor
 
-from features import CATEGORICAL, FEATURES, NUMERIC, daily_counts, load_history, make_features
+from features import CATEGORICAL, FEATURES, NUMERIC, load_history, make_features
+from train_config import DEFAULTS, SCALE_REAL, load_config
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"
 MODELS = ["baseline", "poisson", "xgb"]
@@ -45,7 +49,7 @@ class SameWeekdayBaseline:
         return X["dow_avg"].to_numpy(dtype=float)
 
 
-def build(name: str):
+def build(name: str, cfg: dict = DEFAULTS):
     onehot = OneHotEncoder(handle_unknown="ignore")
     if name == "baseline":
         return SameWeekdayBaseline()
@@ -54,12 +58,15 @@ def build(name: str):
             ("cat", onehot, CATEGORICAL),
             ("num", make_pipeline(FunctionTransformer(np.log1p), StandardScaler()), NUMERIC),
         ])
-        return Pipeline([("prep", prep), ("model", PoissonRegressor(alpha=1e-3, max_iter=2000))])
+        return Pipeline([("prep", prep), ("model", PoissonRegressor(
+            alpha=cfg["poisson_alpha"], max_iter=cfg["poisson_max_iter"]))])
     if name == "xgb":
         prep = ColumnTransformer([("cat", onehot, CATEGORICAL)], remainder="passthrough")
         return Pipeline([("prep", prep), ("model", XGBRegressor(
-            objective="count:poisson", n_estimators=400, max_depth=4, learning_rate=0.03,
-            subsample=0.8, colsample_bytree=0.8, random_state=0))])
+            objective="count:poisson", n_estimators=cfg["xgb_n_estimators"],
+            max_depth=cfg["xgb_max_depth"], learning_rate=cfg["xgb_learning_rate"],
+            subsample=cfg["xgb_subsample"], colsample_bytree=cfg["xgb_colsample_bytree"],
+            random_state=0))])
     raise ValueError(name)
 
 
@@ -71,45 +78,69 @@ def busiest_accuracy(test: pd.DataFrame, pred: np.ndarray) -> float:
     return float(hits.mean())
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--source", choices=["sim", "db", "both"], default="both")
-    ap.add_argument("--test-days", type=int, default=42)
-    args = ap.parse_args()
+def _replace(path: Path, write) -> None:
+    """Write to a temp file, then swap it in, so a reader never sees half a file."""
+    tmp = path.with_name(path.name + ".tmp")
+    write(tmp)
+    os.replace(tmp, path)
 
-    source = args.source
+
+def run(cfg: dict, log=print) -> dict:
+    """Evaluate every model, refit on all days, save; return the metrics.json contents.
+
+    Nothing is saved until every model has trained, so a failed run keeps the old models.
+    """
+    source = cfg["source"]
     try:
-        parcels = load_history(source)
+        daily = load_history(source, cfg["exclude_sessions"], SCALE_REAL[cfg["real_scale"]])
     except Exception as e:
         if source != "both":
             raise
-        print(f"database unavailable ({type(e).__name__}), training on simulated data only")
-        source, parcels = "sim", load_history("sim")
-    feats = make_features(daily_counts(parcels))
-    cutoff = feats["date"].max() - pd.Timedelta(days=args.test_days)
+        log(f"database unavailable ({type(e).__name__}), training on simulated data only")
+        source, daily = "sim", load_history("sim")
+    feats = make_features(daily)
+    cutoff = feats["date"].max() - pd.Timedelta(days=cfg["test_days"])
     train, test = feats[feats["date"] <= cutoff], feats[feats["date"] > cutoff]
-    print(f"{feats['date'].nunique()} days x {feats['block'].nunique()} blocks; "
-          f"train to {cutoff:%Y-%m-%d}, test {test['date'].nunique()} days\n")
+    log(f"{feats['date'].nunique()} days x {feats['block'].nunique()} blocks; "
+        f"train to {cutoff:%Y-%m-%d}, test {test['date'].nunique()} days")
 
-    MODEL_DIR.mkdir(exist_ok=True)
-    metrics, preds = {}, test[["date", "block", "count"]].copy()
+    metrics, preds, final = {}, test[["date", "block", "count"]].copy(), {}
     for name in MODELS:
-        pred = build(name).fit(train[FEATURES], train["count"]).predict(test[FEATURES])
+        log(f"training {name}")
+        pred = build(name, cfg).fit(train[FEATURES], train["count"]).predict(test[FEATURES])
         preds[name] = pred
         err = pred - test["count"].to_numpy()
         metrics[name] = {"mae": float(np.abs(err).mean()),
                          "rmse": float(np.sqrt((err ** 2).mean())),
                          "busiest": busiest_accuracy(test, pred)}
         if name != "baseline":
-            joblib.dump(build(name).fit(feats[FEATURES], feats["count"]),
-                        MODEL_DIR / f"{name}.joblib")
+            final[name] = build(name, cfg).fit(feats[FEATURES], feats["count"])
 
-    table = pd.DataFrame(metrics).T
-    print(table.to_string(float_format=lambda x: f"{x:.3f}"))
-    (MODEL_DIR / "metrics.json").write_text(json.dumps(
-        {"source": source, "test_days": args.test_days,
-         "trained_until": f"{feats['date'].max():%Y-%m-%d}", "models": metrics}, indent=2))
-    preds.to_csv(MODEL_DIR / "test_predictions.csv", index=False)
+    result = {"source": source, "test_days": cfg["test_days"],
+              "trained_until": f"{feats['date'].max():%Y-%m-%d}",
+              "trained_at": pd.Timestamp.now().isoformat(timespec="seconds"),
+              "config": cfg, "models": metrics}
+    MODEL_DIR.mkdir(exist_ok=True)
+    for name, model in final.items():
+        _replace(MODEL_DIR / f"{name}.joblib", lambda p, m=model: joblib.dump(m, p))
+    _replace(MODEL_DIR / "test_predictions.csv", lambda p: preds.to_csv(p, index=False))
+    _replace(MODEL_DIR / "metrics.json", lambda p: p.write_text(json.dumps(result, indent=2)))
+    return result
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--source", choices=["sim", "db", "both"], help="override the saved setting")
+    ap.add_argument("--test-days", type=int, help="override the saved setting")
+    args = ap.parse_args()
+
+    cfg = load_config()
+    if args.source:
+        cfg["source"] = args.source
+    if args.test_days:
+        cfg["test_days"] = args.test_days
+    result = run(cfg)
+    print("\n" + pd.DataFrame(result["models"]).T.to_string(float_format=lambda x: f"{x:.3f}"))
     print(f"\nmodels, metrics.json and test_predictions.csv saved to {MODEL_DIR}")
 
 

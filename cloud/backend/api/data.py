@@ -75,12 +75,14 @@ def live(source: str, scope: str) -> dict:
                 .reindex(columns=ZONES, fill_value=0).reset_index())
 
     arrivals, freq = [], None
-    if not p.empty:
-        span = p["arrived_at"].max() - p["arrived_at"].min()
+    # a parcel seen only by the gateway or Node 2 (no node1/arrival) has no arrival time
+    arrived = p.dropna(subset=["arrived_at"])
+    if not arrived.empty:
+        span = arrived["arrived_at"].max() - arrived["arrived_at"].min()
         freq = ("10 s" if span < pd.Timedelta(minutes=10)
                 else "minute" if span < pd.Timedelta(hours=2)
                 else "hour" if span < pd.Timedelta(days=2) else "day")
-        s = p.set_index("arrived_at")["seq"].resample(BUCKETS[freq]).count()
+        s = arrived.set_index("arrived_at")["seq"].resample(BUCKETS[freq]).count()
         arrivals = records(s.rename("count").rename_axis("t").reset_index())
 
     return {

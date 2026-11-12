@@ -22,6 +22,7 @@ import os
 import queue
 import threading
 import time
+from pathlib import Path
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -112,6 +113,11 @@ def main() -> None:
     client.will_set(STATUS_TOPIC, "offline", qos=1, retain=True)
     client.on_connect = on_connect
     client.on_message = on_message
+    if os.getenv("MQTT_USERNAME"):
+        client.username_pw_set(os.environ["MQTT_USERNAME"], os.getenv("MQTT_PASSWORD"))
+    ca = os.getenv("MQTT_CA_CERT")  # the broker's certificate; setting it turns on TLS
+    if ca:
+        client.tls_set(ca_certs=str(Path(ca) if Path(ca).is_absolute() else Path(__file__).parent / ca))
     client.connect(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
     client.loop_start()
 
