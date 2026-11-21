@@ -1,5 +1,3 @@
-"""Scan a parcel label's Code 128 barcode or QR code from a live camera."""
-
 from __future__ import annotations
 
 import argparse
@@ -10,8 +8,7 @@ import time
 from typing import Any
 
 
-# The destination zone is determined by the block, not the floor.
-# Blocks missing from this mapping are sent to MANUAL.
+# Blocks outside this prototype's map go to MANUAL.
 BLOCK_TO_ZONE = {
     "123": "A",
     "124": "A",
@@ -29,22 +26,11 @@ KNOWN_BLOCKS = set(BLOCK_TO_ZONE)
 
 
 def zone_for(block: str) -> str:
-    """Return the sorting zone assigned to a block, or MANUAL if unmapped."""
     normalized_block = block.strip().upper()
     return BLOCK_TO_ZONE.get(normalized_block, "MANUAL")
 
 
-# Code 128 value encoded in the barcode, for example:
-# PO042-123-7-07123
-_LABEL_BARCODE_RE = re.compile(
-    r"^(?P<parcel_id>P[A-Za-z0-9]+)-"
-    r"(?P<block>[A-Za-z0-9]+)-"
-    r"(?P<floor>\d{1,2})-"
-    r"(?P<unit>\d{2})-?(?P<unit_suffix>\d{3})$",
-    re.IGNORECASE,
-)
 
-# QR text format, for example:
 # ID:PO042 BLK:123 FL:7 UNIT:07-123 ZN:B SEQ:17
 _QR_FIELDS_RE = re.compile(
     r"^ID:(?P<parcel_id>[A-Za-z0-9_-]+)\s+"
@@ -58,13 +44,12 @@ _QR_FIELDS_RE = re.compile(
 
 
 def _parse_label_text(raw_label: str | None) -> dict[str, Any] | None:
-    """Parse the label's Code 128 text, QR text, or JSON QR payload."""
     if not raw_label:
         return None
 
     raw_label = raw_label.strip()
 
-    # Some QR codes may contain a JSON object.
+    # QR payloads may be JSON or plain text.
     try:
         payload = json.loads(raw_label)
     except (json.JSONDecodeError, TypeError):
@@ -91,8 +76,7 @@ def _parse_label_text(raw_label: str | None) -> dict[str, Any] | None:
                 "unit": unit.strip(),
             }
 
-    # Parse QR text such as:
-    # ID:PO042 BLK:123 FL:7 UNIT:07-123 ZN:B SEQ:17
+    # Plain-text QR labels use fields like ID, BLK, FL, and UNIT.
     match = _QR_FIELDS_RE.fullmatch(raw_label)
     if match:
         fields = match.groupdict()
@@ -103,23 +87,10 @@ def _parse_label_text(raw_label: str | None) -> dict[str, Any] | None:
             "unit": fields["unit"],
         }
 
-    # Parse the Code 128 value:
-    # PO042-123-7-07123
-    match = _LABEL_BARCODE_RE.fullmatch(raw_label)
-    if match:
-        fields = match.groupdict()
-        return {
-            "parcel_id": fields["parcel_id"],
-            "block": fields["block"].upper(),
-            "floor": int(fields["floor"]),
-            "unit": f"{fields['unit']}-{fields['unit_suffix']}",
-        }
-
     return None
 
 
 def make_scan_event(seq: int, raw_label: str | None) -> dict[str, Any]:
-    """Validate decoded label data and create the gateway scan-event payload."""
     if not isinstance(seq, int) or isinstance(seq, bool) or seq < 1:
         raise ValueError("seq must be a positive integer")
 
@@ -150,7 +121,7 @@ def make_scan_event(seq: int, raw_label: str | None) -> dict[str, Any]:
         )
 
         if valid_fields and candidate_block in KNOWN_BLOCKS:
-            # Floor is retained in the event, but it does not affect routing.
+         
             mapped_zone = zone_for(candidate_block)
 
             if mapped_zone != "MANUAL":
@@ -172,29 +143,25 @@ def make_scan_event(seq: int, raw_label: str | None) -> dict[str, Any]:
     }
 
 
-def decode_barcode_from_frame(frame: Any) -> str | None:
-    """Decode a Code 128 barcode or QR code from one camera frame."""
+def decode_qr_from_frame(frame: Any) -> str | None:
     try:
         import zxingcpp
     except ImportError as exc:
-        raise RuntimeError("The zxingcpp barcode decoder is unavailable.") from exc
+        raise RuntimeError("The zxingcpp QR decoder is unavailable.") from exc
 
     results = zxingcpp.read_barcodes(frame)
 
-    supported_formats = {
-        zxingcpp.BarcodeFormat.Code128,
-        zxingcpp.BarcodeFormat.QRCode,
-    }
+    qr_format = zxingcpp.BarcodeFormat.QRCode
 
     first_supported_text = None
 
     for result in results:
-        if result.format not in supported_formats or not result.text:
+        if result.format != qr_format or not result.text:
             continue
 
         text = result.text.strip()
 
-        # Prefer a result that matches one of the supported label formats.
+        # Return a recognized label as soon as one is found.
         if _parse_label_text(text) is not None:
             return text
 
@@ -205,8 +172,6 @@ def decode_barcode_from_frame(frame: Any) -> str | None:
 
 
 class LatestFrameCamera:
-    """Continuously capture frames and keep the newest one for decoding."""
-
     def __init__(self, source: str):
         try:
             import cv2
@@ -224,8 +189,7 @@ class LatestFrameCamera:
                 "Check the stream URL and network."
             )
 
-        # Some camera backends may ignore this setting. The reader thread
-        # still keeps the newest frame available if decoding falls behind.
+     
         self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         self.lock = threading.Lock()
@@ -236,7 +200,6 @@ class LatestFrameCamera:
         self.reader.start()
 
     def _read_frames(self) -> None:
-        """Read continuously so decoding does not block camera capture."""
         while self.running:
             ok, frame = self.capture.read()
             if ok:
@@ -247,24 +210,21 @@ class LatestFrameCamera:
                 time.sleep(0.02)
 
     def latest_frame(self):
-        """Return the newest frame and its number."""
         with self.lock:
             return self.frame, self.frame_number
 
     def close(self) -> None:
-        """Stop the capture thread and release the camera."""
         self.running = False
         self.reader.join(timeout=1.0)
         self.capture.release()
 
 
 def scan_from_camera(source: str, timeout: float) -> str | None:
-    """Read the newest camera frames until a supported code is found."""
     camera = LatestFrameCamera(source)
     deadline = time.monotonic() + timeout
     last_frame_number = 0
 
-    print(f"Scanning for a barcode or QR code for up to {timeout:g} seconds...")
+    print(f"Scanning for a QR code for up to {timeout:g} seconds...")
 
     try:
         while time.monotonic() < deadline:
@@ -274,9 +234,9 @@ def scan_from_camera(source: str, timeout: float) -> str | None:
                 time.sleep(0.01)
                 continue
 
-            # Decode the newest frame instead of working through a backlog.
+            # Skip old frames if decoding has fallen behind.
             last_frame_number = frame_number
-            label_text = decode_barcode_from_frame(frame)
+            label_text = decode_qr_from_frame(frame)
 
             if label_text:
                 print(f"Code read: {label_text}")
@@ -284,12 +244,11 @@ def scan_from_camera(source: str, timeout: float) -> str | None:
     finally:
         camera.close()
 
-    print("No supported barcode or QR code was decoded before the timeout.")
+    print("No QR code was read before the timeout.")
     return None
 
 
 def scan_continuously(source: str, start_seq: int) -> None:
-    """Continuously scan the newest frames and emit one event per new label."""
     camera = LatestFrameCamera(source)
     seq = start_seq
     active_label: str | None = None
@@ -307,7 +266,7 @@ def scan_continuously(source: str, start_seq: int) -> None:
                 continue
 
             last_frame_number = frame_number
-            label_text = decode_barcode_from_frame(frame)
+            label_text = decode_qr_from_frame(frame)
             now = time.monotonic()
 
             if label_text:

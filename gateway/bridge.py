@@ -1,5 +1,3 @@
-"""Continuously scan parcel labels and publish events over MQTT."""
-
 from __future__ import annotations
 
 import argparse
@@ -16,13 +14,13 @@ import cv2
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
-from scanner import decode_barcode_from_frame, make_scan_event
+from scanner import decode_qr_from_frame, make_scan_event
 
 
 SCAN_TOPIC = "zonesort/gateway/scan"
 STATUS_TOPIC = "zonesort/gateway/status"
 
-# A new identifier separates sequence numbers from different bridge runs.
+# Keep scans from separate runs distinguishable when seq starts over.
 SESSION_ID = uuid.uuid4().hex
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -30,15 +28,12 @@ load_dotenv(SCRIPT_DIR / ".env")
 
 
 def utc_timestamp() -> str:
-    """Return the current UTC time in ISO 8601 format."""
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
         "+00:00", "Z"
     )
 
 
 class Camera:
-    """Keep a live camera stream open and decode labels from its newest frames."""
-
     def __init__(self, source: str):
         camera_source: int | str = int(source) if source.isdigit() else source
         self.capture = cv2.VideoCapture(camera_source)
@@ -61,7 +56,6 @@ class Camera:
         self.reader_thread.start()
 
     def _read_frames(self) -> None:
-        """Continuously read frames, keeping only the newest one."""
         while self.running:
             ok, frame = self.capture.read()
 
@@ -72,17 +66,15 @@ class Camera:
                 time.sleep(0.05)
 
     def read_label(self) -> str | None:
-        """Try to decode a barcode or QR code from the newest frame."""
         with self.lock:
             frame = self.frame
 
         if frame is None:
             return None
 
-        return decode_barcode_from_frame(frame)
+        return decode_qr_from_frame(frame)
 
     def close(self) -> None:
-        """Stop reading frames and release the camera."""
         self.running = False
         self.reader_thread.join(timeout=1)
         self.capture.release()
@@ -95,19 +87,16 @@ def main() -> None:
     parser.add_argument(
         "--camera",
         required=True,
-        help="Phone stream URL or camera index, such as 0",
     )
     parser.add_argument(
         "--seq",
         type=int,
         default=1,
-        help="Sequence number to use for the first scan (default: 1)",
     )
     parser.add_argument(
         "--reset-after",
         type=float,
         default=1.0,
-        help="Seconds a label must be out of view before it can scan again",
     )
     args = parser.parse_args()
 
@@ -177,10 +166,9 @@ def main() -> None:
             if label_text:
                 missing_since = None
 
-                # Publish a label once while it remains in view.
+                # Don't publish the same label again while it stays in view.
                 if label_text != active_label:
-                    # This is the time the camera detects the label,
-                    # not physical parcel-arrival time.
+                    # This records camera detection, not belt arrival.
                     arrival_time = utc_timestamp()
 
                     event = make_scan_event(seq, label_text)
@@ -195,7 +183,7 @@ def main() -> None:
                     )
                     info.wait_for_publish(timeout=10)
 
-                    print(f"\nBarcode/QR text read: {label_text}")
+                    print(f"\nQR text read: {label_text}")
                     print(f"Published to {SCAN_TOPIC}:")
                     print(json.dumps(event, indent=2))
 

@@ -1,3 +1,4 @@
 opencv-python
+zxing-cpp
 paho-mqtt
 python-dotenv
